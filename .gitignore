@@ -1,0 +1,14 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 本地虚拟环境
+.venv/
+venv/
+env/
+
+# 测试与工具缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

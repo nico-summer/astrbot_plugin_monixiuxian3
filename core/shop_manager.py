@@ -3,6 +3,7 @@
 import random
 import time
 import json
+import hashlib
 from typing import List, Dict, Optional, Tuple
 
 from astrbot.api import AstrBotConfig, logger
@@ -179,6 +180,33 @@ class ShopManager:
                 updated = True
         return updated
 
+    def ensure_items_have_market_ids(self, shop_items: List[Dict], pavilion_id: str) -> bool:
+        """为商店条目补齐可用于购买的短码（兼容旧库存数据）。"""
+        updated = False
+        used_codes = set()
+        for index, item in enumerate(shop_items):
+            code = str(item.get('market_id', '')).strip().upper()
+            if code and code not in used_codes:
+                if item.get('market_id') != code:
+                    updated = True
+                item['market_id'] = code
+                used_codes.add(code)
+                continue
+            data = item.get('data', {}) if isinstance(item.get('data', {}), dict) else {}
+            source_id = item.get('id') or data.get('id') or item.get('name', '')
+            seed = f"{pavilion_id}:{source_id}:{index}"
+            suffix = 0
+            while True:
+                digest = hashlib.sha1(f"{seed}:{suffix}".encode('utf-8')).hexdigest().upper()
+                candidate = digest[:5]
+                if candidate not in used_codes:
+                    break
+                suffix += 1
+            item['market_id'] = candidate
+            used_codes.add(candidate)
+            updated = True
+        return updated
+
     def generate_shop_items(self, count: int) -> List[Dict]:
         """生成商店物品列表
 
@@ -232,7 +260,7 @@ class ShopManager:
             return False
         return (int(time.time()) - last_refresh_time) >= (refresh_hours * 3600)
 
-    def generate_pavilion_items(self, item_getter, count: int) -> List[Dict]:
+    def generate_pavilion_items(self, item_getter, count: int, pavilion_id: str = 'pavilion') -> List[Dict]:
         """生成阁楼物品列表（带库存和折扣）"""
         base_items = item_getter(count * 2)  # 获取更多以便随机选择
         selected = self._weighted_random_choice(
@@ -245,10 +273,12 @@ class ShopManager:
             discount = random.uniform(discount_min, discount_max)
             stock = self._calculate_stock(item.get('weight', 100))
             result.append({
+                'id': item.get('id') or item.get('data', {}).get('id', item['name']),
                 'name': item['name'], 'type': item['type'], 'rank': item['rank'],
                 'original_price': item['price'], 'discount': discount,
                 'price': int(item['price'] * discount), 'stock': stock, 'data': item.get('data', {})
             })
+        self.ensure_items_have_market_ids(result, pavilion_id)
         return result
 
     def get_pills_for_display(self, count: int) -> List[Dict]:
@@ -256,13 +286,13 @@ class ShopManager:
         all_pills = []
         for pill in self.config_manager.pills_data.values():
             if pill.get('price', 0) > 0:
-                all_pills.append({'name': pill['name'], 'type': 'pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
+                all_pills.append({'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
         for pill in self.config_manager.exp_pills_data.values():
             if pill.get('price', 0) > 0:
-                all_pills.append({'name': pill['name'], 'type': 'exp_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
+                all_pills.append({'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'exp_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
         for pill in self.config_manager.utility_pills_data.values():
             if pill.get('price', 0) > 0:
-                all_pills.append({'name': pill['name'], 'type': 'utility_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
+                all_pills.append({'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'utility_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
         return all_pills
 
     def get_weapons_for_display(self, count: int) -> List[Dict]:
@@ -270,7 +300,7 @@ class ShopManager:
         all_weapons = []
         for weapon in self.config_manager.weapons_data.values():
             if weapon.get('price', 0) > 0:
-                all_weapons.append({'name': weapon['name'], 'type': 'weapon', 'price': weapon['price'], 'rank': weapon.get('rank', '凡品'), 'data': weapon})
+                all_weapons.append({'id': weapon.get('id', weapon['name']), 'name': weapon['name'], 'type': 'weapon', 'price': weapon['price'], 'rank': weapon.get('rank', '凡品'), 'data': weapon})
         return all_weapons
 
     def get_all_items_for_display(self, count: int) -> List[Dict]:
@@ -283,16 +313,16 @@ class ShopManager:
             if item.get('price', 0) > 0:
                 # 映射旧格式类型到新格式
                 item_type = self._map_legacy_item_type(item)
-                all_items.append({'name': item['name'], 'type': item_type, 'price': item['price'], 'rank': item.get('rank', '凡品'), 'data': item})
+                all_items.append({'id': item.get('id', item['name']), 'name': item['name'], 'type': item_type, 'price': item['price'], 'rank': item.get('rank', '凡品'), 'data': item})
         for pill in self.config_manager.pills_data.values():
             if pill.get('price', 0) > 0:
-                all_items.append({'name': pill['name'], 'type': 'pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
+                all_items.append({'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
         for pill in self.config_manager.exp_pills_data.values():
             if pill.get('price', 0) > 0:
-                all_items.append({'name': pill['name'], 'type': 'exp_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
+                all_items.append({'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'exp_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
         for pill in self.config_manager.utility_pills_data.values():
             if pill.get('price', 0) > 0:
-                all_items.append({'name': pill['name'], 'type': 'utility_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
+                all_items.append({'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'utility_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill})
         return all_items
 
     def _map_legacy_item_type(self, item: dict) -> str:
@@ -337,21 +367,21 @@ class ShopManager:
         """根据名称查找物品"""
         for weapon in self.config_manager.weapons_data.values():
             if weapon['name'] == name and weapon.get('price', 0) > 0:
-                return {'name': weapon['name'], 'type': 'weapon', 'price': weapon['price'], 'rank': weapon.get('rank', '凡品'), 'data': weapon}
+                return {'id': weapon.get('id', weapon['name']), 'name': weapon['name'], 'type': 'weapon', 'price': weapon['price'], 'rank': weapon.get('rank', '凡品'), 'data': weapon}
         for item in self.config_manager.items_data.values():
             if item['name'] == name and item.get('price', 0) > 0:
                 # 映射旧格式类型到新格式
                 item_type = self._map_legacy_item_type(item)
-                return {'name': item['name'], 'type': item_type, 'price': item['price'], 'rank': item.get('rank', '凡品'), 'data': item}
+                return {'id': item.get('id', item['name']), 'name': item['name'], 'type': item_type, 'price': item['price'], 'rank': item.get('rank', '凡品'), 'data': item}
         for pill in self.config_manager.pills_data.values():
             if pill['name'] == name and pill.get('price', 0) > 0:
-                return {'name': pill['name'], 'type': 'pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill}
+                return {'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill}
         for pill in self.config_manager.exp_pills_data.values():
             if pill['name'] == name and pill.get('price', 0) > 0:
-                return {'name': pill['name'], 'type': 'exp_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill}
+                return {'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'exp_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill}
         for pill in self.config_manager.utility_pills_data.values():
             if pill['name'] == name and pill.get('price', 0) > 0:
-                return {'name': pill['name'], 'type': 'utility_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill}
+                return {'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'utility_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill}
         return None
 
     def format_pavilion_display(self, pavilion_name: str, items: List[Dict], refresh_hours: int = 6, last_refresh: int = 0) -> str:
@@ -382,13 +412,15 @@ class ShopManager:
             effect_desc = self._get_item_effect_short(item)
             effect_line = f"\n   效果: {effect_desc}" if effect_desc else ""
             
-            lines.append(f"{i}. [{item['rank']}] {item['name']} ({type_label}){discount_text}\n   价格: {item['price']} 灵石 {stock_text}{effect_line}\n")
+            market_id = item.get('market_id', '')
+            code_text = f" [{market_id}]" if market_id else ""
+            lines.append(f"{i}. [{item['rank']}] {item['name']} ({type_label}){code_text}{discount_text}\n   价格: {item['price']} 灵石 {stock_text}{effect_line}\n")
 
         if refresh_hours > 0 and last_refresh:
             remaining = (last_refresh + refresh_hours * 3600) - int(time.time())
             if remaining > 0:
                 lines.append(f"\n下次刷新: {remaining // 3600}小时{(remaining % 3600) // 60}分钟后")
-        lines.append(f"\n提示: 使用 '购买 [物品名]' 购买物品")
+        lines.append(f"\n提示: 使用 '购买 [物品名/短码] [数量]' 购买物品")
         return "".join(lines)
 
     def _get_item_effect_short(self, item: Dict) -> str:

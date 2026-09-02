@@ -47,11 +47,12 @@ class ShopHandler:
         last_refresh_time, current_items = await self.db.get_shop_data(pavilion_id)
         if current_items:
             updated = self.shop_manager.ensure_items_have_stock(current_items)
+            updated = self.shop_manager.ensure_items_have_market_ids(current_items, pavilion_id) or updated
             if updated:
                 await self.db.update_shop_data(pavilion_id, last_refresh_time, current_items)
         refresh_hours = self.config.get("PAVILION_REFRESH_HOURS", 6)
         if not current_items or self.shop_manager.should_refresh_shop(last_refresh_time, refresh_hours):
-            new_items = self.shop_manager.generate_pavilion_items(item_getter, count)
+            new_items = self.shop_manager.generate_pavilion_items(item_getter, count, pavilion_id)
             await self.db.update_shop_data(pavilion_id, int(time.time()), new_items)
 
     async def handle_pill_pavilion(self, event: AstrMessageEvent):
@@ -96,7 +97,9 @@ class ShopHandler:
             _, items = await self.db.get_shop_data(pavilion_id)
             if items:
                 for item in items:
-                    if item['name'] == item_name and item.get('stock', 0) > 0:
+                    same_name = item.get('name') == item_name
+                    same_code = str(item.get('market_id', '')).upper() == item_name.strip().upper()
+                    if (same_name or same_code) and item.get('stock', 0) > 0:
                         return pavilion_id, item
         return None, None
 
@@ -140,8 +143,10 @@ class ShopHandler:
 
         pavilion_id, target_item = await self._find_item_in_pavilions(item_name)
         if not target_item:
-            yield event.plain_result(f"没有找到【{item_name}】，请检查物品名称或等待刷新。")
+            yield event.plain_result(f"无效的市场ID或物品名称: {item_name}\n请使用“市场”命令查看商品短码，或等待商店刷新。")
             return
+
+        item_name = target_item['name']
 
         stock = target_item.get('stock', 0)
         if quantity > stock:
