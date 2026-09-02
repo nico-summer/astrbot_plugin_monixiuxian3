@@ -4,7 +4,7 @@
   <img src="logo.png" alt="模拟修仙" width="200">
 </p>
 
-> **版本:** v3.1.6  
+> **版本:** v3.1.7  
 > **许可证:** AGPL-3.0  
 > **作者:** xiaojuwa  
 > **基于:** [nonebot_plugin_xiuxian_2](https://github.com/xiuxian-2/nonebot_plugin_xiuxian_2) (部分借鉴与重构)
@@ -306,6 +306,10 @@ astrbot_plugin_monixiuxian2/
 ---
 
 ## 📝 更新日志
+
+### v3.1.7 - 修复插件循环导入
+
+修复插件初始化时 `ShopManager` 因 `ConfigManager` 与数据库迁移模块互相导入而无法加载的问题。
 
 ### v3.1.6 - 修复商店短码购买
 
