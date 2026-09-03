@@ -22,6 +22,7 @@ class BreakthroughHandler:
         self.config = config
         self.breakthrough_manager = BreakthroughManager(db, config_manager, config)
         self.pill_manager = PillManager(db, config_manager)
+        self._active_breakthroughs = set()
 
     @player_required
     async def handle_breakthrough_info(self, player: Player, event: AstrMessageEvent):
@@ -126,7 +127,25 @@ class BreakthroughHandler:
     @player_required
     async def handle_breakthrough(self, player: Player, event: AstrMessageEvent, pill_name: str = None):
         """执行突破"""
-        display_name = event.get_sender_name()
+        user_id = player.user_id
+        if user_id in self._active_breakthroughs:
+            yield event.plain_result("⏳ 你上一次突破仍在处理中，请勿重复提交。")
+            return
+
+        self._active_breakthroughs.add(user_id)
+        try:
+            fresh_player = await self.db.get_player_by_id(user_id)
+            if not fresh_player:
+                yield event.plain_result("道友尚未踏入仙途。")
+                return
+
+            async for result in self._execute_breakthrough(fresh_player, event, pill_name):
+                yield result
+        finally:
+            self._active_breakthroughs.discard(user_id)
+
+    async def _execute_breakthrough(self, player: Player, event: AstrMessageEvent, pill_name: str = None):
+        """在玩家级并发保护下执行突破。"""
 
         await self.pill_manager.update_temporary_effects(player)
         modifiers = self.pill_manager.get_breakthrough_modifiers(player)
@@ -162,10 +181,8 @@ class BreakthroughHandler:
                 )
                 return
 
-            yield event.plain_result(f"使用【{pill_name}】进行突破...")
         else:
             pill_name = None
-            yield event.plain_result("开始尝试突破...")
 
         # 执行突破
         success, message, died = await self.breakthrough_manager.execute_breakthrough(
