@@ -1,7 +1,7 @@
 {
-    "astrbot_plugin_monixiuxian2": {
-        "author": "xiaojuwa",
-        "desc": "xiuxian2",
-        "repo": "https://github.com/xiaojuwa/astrbot_plugin_monixiuxian2"
+    "astrbot_plugin_monixiuxian2_niko": {
+        "author": "n1ko",
+        "desc": "模拟修仙 v2（n1ko 修复与增强版）",
+        "repo": "https://github.com/nico-summer/astrbot_plugin_monixiuxian2"
     }
 }

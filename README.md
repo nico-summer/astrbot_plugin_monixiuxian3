@@ -4,9 +4,9 @@
   <img src="logo.png" alt="模拟修仙" width="200">
 </p>
 
-> **版本:** v3.1.9
+> **版本:** v3.1.10
 > **许可证:** AGPL-3.0  
-> **作者:** xiaojuwa  
+> **作者:** n1ko
 > **基于:** [nonebot_plugin_xiuxian_2](https://github.com/xiuxian-2/nonebot_plugin_xiuxian_2) (部分借鉴与重构)
 
 一款为 AstrBot 设计的、功能丰富的放置类修仙游戏插件。让你在聊天群中体验从凡人到大能的修行之路，工作摸鱼、畅聊吹水的同时亦可得道飞升！
@@ -233,7 +233,7 @@
 
 ## ⚙️ 配置说明
 
-插件首次运行后，将在 `data/plugins/astrbot_plugin_monixiuxian2/config/` 目录下自动生成默认配置文件：
+插件首次运行后，将在 `data/plugins/astrbot_plugin_monixiuxian2_niko/config/` 目录下自动生成默认配置文件：
 
 | 配置文件 | 作用 |
 |---------|------|
@@ -306,6 +306,11 @@ astrbot_plugin_monixiuxian2/
 ---
 
 ## 📝 更新日志
+
+### v3.1.10 - 修复插件唯一标识冲突
+
+- 将插件唯一标识调整为 `astrbot_plugin_monixiuxian2_niko`，避免与 AstrBot 插件市场中的原版同名插件冲突。
+- 同步调整插件数据目录标识；迁移旧数据时请将数据库复制到新目录 `data/plugin_data/astrbot_plugin_monixiuxian2_niko/`。
 
 ### v3.1.9 - 完善决斗奖励
 
