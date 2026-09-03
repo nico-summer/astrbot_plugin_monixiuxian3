@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 23  # v23: 世界Boss伤害榜
+LATEST_DB_VERSION = 24  # v24: 恢复次数记录
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -20,6 +20,16 @@ def migration(version: int):
 async def _migrate_to_v23(conn: aiosqlite.Connection, config_manager: ConfigManager):
     await conn.execute("CREATE TABLE IF NOT EXISTS boss_damage (boss_id INTEGER NOT NULL, user_id TEXT NOT NULL, damage INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (boss_id, user_id))")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_damage_boss ON boss_damage(boss_id, damage DESC)")
+
+@migration(24)
+async def _migrate_to_v24(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS recovery_usage (
+            user_id TEXT PRIMARY KEY,
+            window_start INTEGER NOT NULL DEFAULT 0,
+            use_count INTEGER NOT NULL DEFAULT 0
+        )
+    """)
 
 class MigrationManager:
     """数据库迁移管理器"""
@@ -590,6 +600,14 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     """)
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_trans_user ON bank_transactions(user_id)")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_trans_time ON bank_transactions(created_at)")
+
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS recovery_usage (
+            user_id TEXT PRIMARY KEY,
+            window_start INTEGER NOT NULL DEFAULT 0,
+            use_count INTEGER NOT NULL DEFAULT 0
+        )
+    """)
 
     logger.info("数据库表已创建完成（v2 - 完整修仙系统）")
 

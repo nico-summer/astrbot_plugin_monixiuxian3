@@ -1,4 +1,5 @@
 import asyncio
+import time
 from functools import wraps
 from pathlib import Path
 from astrbot.api import logger, AstrBotConfig
@@ -610,6 +611,18 @@ class XiuXianPlugin(Star):
         if not player:
             yield event.plain_result("❌ 你还未踏入修仙之路！")
             return
+        recovery_config = self.config_manager.game_config.get("recovery", {})
+        max_uses = max(1, int(recovery_config.get("max_uses", 3)))
+        window_seconds = max(1, int(recovery_config.get("window_seconds", 86400)))
+        now = int(time.time())
+        window_start, use_count = await self.db.ext.get_recovery_usage(player.user_id)
+        if now - window_start >= window_seconds:
+            window_start, use_count = now, 0
+        if use_count >= max_uses:
+            remaining = max(0, window_seconds - (now - window_start))
+            hours, minutes = divmod((remaining + 59) // 60, 60)
+            yield event.plain_result(f"❌ 24小时内恢复次数已用尽（{max_uses}次），还需约{hours}小时{minutes}分钟后可再次使用。")
+            return
         impart = await self.db.ext.get_impart_info(player.user_id)
         player.hp, player.mp = self.combat_mgr.calculate_hp_mp(
             player.experience, impart.impart_hp_per if impart else 0.0,
@@ -619,7 +632,8 @@ class XiuXianPlugin(Star):
             player.experience, player.atkpractice, impart.impart_atk_per if impart else 0.0,
         )
         await self.db.update_player(player)
-        yield event.plain_result(f"✅ 恢复完成！战斗HP：{player.hp}，真元：{player.mp}")
+        await self.db.ext.record_recovery_use(player.user_id, window_start or now, use_count + 1)
+        yield event.plain_result(f"✅ 恢复完成！战斗HP：{player.hp}，真元：{player.mp}\n本轮24小时已使用恢复：{use_count + 1}/{max_uses}")
 
     @filter.command(CMD_REBIRTH, "弃道重修（7天一次）")
     @require_whitelist

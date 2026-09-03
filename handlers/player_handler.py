@@ -282,7 +282,7 @@ class PlayerHandler:
             "━━━━━━━━━━━━━━━\n"
             "闭关期间，你将与世隔绝，潜心修炼。\n"
             f"💡 发送「{CMD_END_CULTIVATION}」结束闭关\n"
-            "⏱️ 每分钟将获得修为，受灵根资质影响。"
+            "⏱️ 每分钟将获得修为，受灵根资质影响；闭关期间战斗HP会缓慢恢复。"
         )
 
     @player_required
@@ -317,6 +317,28 @@ class PlayerHandler:
 
         # 更新丹药效果，确保持续结算
         await self.pill_manager.update_temporary_effects(player)
+
+        cultivation_config = self.config_manager.game_config.get("cultivation", {})
+        hp_recovery_minutes = max(1, int(cultivation_config.get("hp_recovery_duration_minutes", 30)))
+        impart = await self.db.ext.get_impart_info(player.user_id)
+        hp_buff = impart.impart_hp_per if impart else 0.0
+        max_hp = int(player.experience * (1 + hp_buff) // 2)
+        old_hp = player.hp
+        if max_hp > 0 and player.hp < max_hp:
+            recovery_ratio = min(1.0, duration_minutes / hp_recovery_minutes)
+            recovered_hp = int(max_hp * recovery_ratio)
+            player.hp = min(max_hp, max(player.hp, 0) + recovered_hp)
+        actual_recovered_hp = max(0, player.hp - old_hp)
+
+        clear_subtypes = set(cultivation_config.get("cultivation_clear_debuff_subtypes", ["duel_debuff"]))
+        effects = player.get_active_pill_effects()
+        remaining_effects = [
+            effect for effect in effects
+            if effect.get("clear_on_cultivation") is False
+            or (effect.get("subtype") not in clear_subtypes and not effect.get("clear_on_cultivation", False))
+        ]
+        cleared_effects = [effect for effect in effects if effect not in remaining_effects]
+        player.set_active_pill_effects(remaining_effects)
         pill_multipliers = self.pill_manager.calculate_pill_attribute_effects(player)
 
         # 获取主修心法的修为加成
@@ -365,12 +387,16 @@ class PlayerHandler:
             effective_hours = MAX_CULTIVATION_MINUTES // 60
             exceed_msg = f"\n⚠️ 闭关超过{effective_hours}小时，仅计算前{effective_hours}小时修为"
 
+        recovery_msg = f"\n❤️ 战斗HP恢复：+{actual_recovered_hp}（{player.hp}/{max_hp}）" if max_hp > 0 else ""
+        cleared_names = [effect.get("pill_name") or effect.get("subtype", "未知状态") for effect in cleared_effects]
+        debuff_msg = f"\n✨ 已消除状态：{'、'.join(cleared_names)}" if cleared_names else ""
+
         reply_msg = (
             "🌟 道友出关成功！\n"
             "━━━━━━━━━━━━━━━\n"
             f"⏱️ 闭关时长：{time_str}\n"
             f"📈 获得修为：{gained_exp:,}{exceed_msg}\n"
-            f"💫 当前修为：{player.experience:,}\n"
+            f"💫 当前修为：{player.experience:,}{recovery_msg}{debuff_msg}\n"
             "━━━━━━━━━━━━━━━\n"
             "道友已回归红尘，可继续修行。"
         )

@@ -1,7 +1,14 @@
 {
     "cultivation": {
         "max_cultivation_minutes": 1440,
-        "comment": "闭关时长上限（分钟），24小时=1440分钟"
+        "hp_recovery_duration_minutes": 30,
+        "cultivation_clear_debuff_subtypes": ["duel_debuff"],
+        "comment": "闭关时长上限（分钟），以及闭关回血/可清除Debuff配置"
+    },
+    "recovery": {
+        "max_uses": 3,
+        "window_seconds": 86400,
+        "comment": "恢复命令次数限制：滚动时间窗口内最多使用次数"
     },
     "combat": {
         "duel_cooldown": 300,

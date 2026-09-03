@@ -361,6 +361,23 @@ class DatabaseExtended:
         await self.conn.commit()
     
     # ===== 用户CD系统 CRUD =====
+
+    async def get_recovery_usage(self, user_id: str):
+        async with self.conn.execute(
+            "SELECT window_start, use_count FROM recovery_usage WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return (int(row[0]), int(row[1])) if row else (0, 0)
+
+    async def record_recovery_use(self, user_id: str, window_start: int, use_count: int):
+        await self.conn.execute(
+            """INSERT INTO recovery_usage (user_id, window_start, use_count)
+               VALUES (?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET window_start = ?, use_count = ?""",
+            (user_id, window_start, use_count, window_start, use_count)
+        )
+        await self.conn.commit()
     
     async def create_user_cd(self, user_id: str):
         """初始化用户CD信息"""
