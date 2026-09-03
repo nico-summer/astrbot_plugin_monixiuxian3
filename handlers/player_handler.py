@@ -178,6 +178,7 @@ class PlayerHandler:
             f"  境界：{player.get_level(self.config_manager)}\n"
             f"  修为：{int(player.experience):,}/{int(required_exp):,}\n"
             f"  灵石：{player.gold:,}\n"
+            f"  战斗HP：{player.hp:,}\n"
             f"  战力：{combat_power:,}\n"
             f"  灵根：{player.spiritual_root}\n"
             f"  突破加成：{breakthrough_rate}\n"

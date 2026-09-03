@@ -176,7 +176,7 @@ ATK：{atk}
         
         if user_cd.type != UserStatus.IDLE:
             return False, "❌ 你当前正忙，无法挑战Boss！", None
-        
+
         # 4. 计算玩家战斗属性
         # 获取buff加成
         impart_info = await self.db.ext.get_impart_info(user_id)
@@ -186,7 +186,7 @@ ATK：{atk}
         crit_rate_buff = impart_info.impart_know_per if impart_info else 0.0
         
         # 计算HP/MP/ATK
-        if player.hp == 0 or player.mp == 0:
+        if player.atk == 0 or player.mp == 0:
             # 如果没有初始化战斗属性，先计算
             hp, mp = self.combat_mgr.calculate_hp_mp(player.experience, hp_buff, mp_buff)
             atk = self.combat_mgr.calculate_atk(player.experience, player.atkpractice, atk_buff)
@@ -199,6 +199,10 @@ ATK：{atk}
             hp = player.hp
             mp = player.mp
             atk = player.atk
+
+        # 初始化后仍为0，说明上次战斗已耗尽，必须先恢复
+        if hp <= 0:
+            return False, "❌ 你的战斗气血已耗尽，请先使用「恢复」恢复气血后再挑战！", None
         
         # 创建玩家战斗属性
         player_stats = CombatStats(
@@ -230,6 +234,8 @@ ATK：{atk}
         
         # 5. 开始战斗
         battle_result = self.combat_mgr.player_vs_boss(player_stats, boss_stats)
+        damage_dealt = max(0, boss.max_hp - battle_result["boss_final_hp"])
+        await self.db.ext.record_boss_damage(boss.boss_id, user_id, damage_dealt)
         
         # 6. 处理战斗结果
         winner = battle_result["winner"]
@@ -240,8 +246,14 @@ ATK：{atk}
             boss.status = 0  # 标记Boss为已击败
             await self.db.ext.defeat_boss(boss.boss_id)
             
-            # 发放奖励
-            player.gold += reward
+            ranking = await self.db.ext.get_boss_damage_ranking(boss.boss_id)
+            total_damage = sum(row["damage"] for row in ranking) or 1
+            for row in ranking:
+                participant = await self.db.get_player_by_id(row["user_id"])
+                if participant:
+                    participant.gold += int(boss.stone_reward * row["damage"] / total_damage)
+                    await self.db.update_player(participant)
+            reward = int(boss.stone_reward * next((r["damage"] for r in ranking if r["user_id"] == user_id), 0) / total_damage)
             
             # 物品掉落
             item_msg = ""
@@ -288,10 +300,6 @@ HP：{battle_result['player_final_hp']}/{player_stats.max_hp}
 {boss.boss_name} 剩余HP：{boss.hp}/{boss.max_hp}
             """.strip()
             
-            # 即使失败也给予部分奖励
-            if reward > 0:
-                player.gold += reward
-        
         # 更新玩家HP/MP
         player.hp = battle_result["player_final_hp"]
         player.mp = battle_result["player_final_mp"]
@@ -300,6 +308,15 @@ HP：{battle_result['player_final_hp']}/{player_stats.max_hp}
         # 返回完整战斗日志
         combat_log = "\n".join(battle_result["combat_log"])
         full_msg = combat_log + "\n\n" + result_msg
+
+        leaderboard = await self.db.ext.get_boss_damage_ranking(boss.boss_id)
+        if leaderboard:
+            lines = ["\n📊 本次Boss伤害榜："]
+            total_damage = max(1, boss.max_hp)
+            for index, row in enumerate(leaderboard, 1):
+                ratio = row["damage"] / total_damage * 100
+                lines.append(f"{index}. {row['user_name'] or row['user_id']}：{row['damage']:,} ({ratio:.1f}%)")
+            full_msg += "\n".join(lines)
         
         return True, full_msg, battle_result
     
@@ -331,6 +348,13 @@ ATK：{boss.atk}
 
 使用 /挑战Boss 来挑战！
         """.strip()
+
+        ranking = await self.db.ext.get_boss_damage_ranking(boss.boss_id)
+        if ranking:
+            msg += "\n\n📊 当前伤害榜：\n" + "\n".join(
+                f"{i}. {row['user_name'] or row['user_id']}：{row['damage']:,}"
+                for i, row in enumerate(ranking, 1)
+            )
         
         return True, msg, boss
     

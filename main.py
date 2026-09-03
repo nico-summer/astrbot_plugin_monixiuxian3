@@ -77,9 +77,10 @@ CMD_SECT_TASK = "宗门任务"
 CMD_SECT_POSITION = "职位变更"
 
 # Boss系统指令
-CMD_BOSS_INFO = "世界Boss"
-CMD_BOSS_FIGHT = "挑战Boss"
-CMD_SPAWN_BOSS = "生成Boss"
+CMD_BOSS_INFO = "世界boss"
+CMD_BOSS_FIGHT = "挑战boss"
+CMD_RECOVER = "恢复"
+CMD_SPAWN_BOSS = "生成boss"
 
 # 排行榜指令
 CMD_RANK_LEVEL = "境界排行"
@@ -601,6 +602,24 @@ class XiuXianPlugin(Star):
     async def handle_player_info(self, event: AstrMessageEvent):
         async for r in self.player_handler.handle_player_info(event):
             yield r
+
+    @filter.command(CMD_RECOVER, "恢复战斗气血与真元")
+    @require_whitelist
+    async def handle_recover(self, event: AstrMessageEvent):
+        player = await self.db.get_player_by_id(str(event.get_sender_id()))
+        if not player:
+            yield event.plain_result("❌ 你还未踏入修仙之路！")
+            return
+        impart = await self.db.ext.get_impart_info(player.user_id)
+        player.hp, player.mp = self.combat_mgr.calculate_hp_mp(
+            player.experience, impart.impart_hp_per if impart else 0.0,
+            impart.impart_mp_per if impart else 0.0,
+        )
+        player.atk = self.combat_mgr.calculate_atk(
+            player.experience, player.atkpractice, impart.impart_atk_per if impart else 0.0,
+        )
+        await self.db.update_player(player)
+        yield event.plain_result(f"✅ 恢复完成！战斗HP：{player.hp}，真元：{player.mp}")
 
     @filter.command(CMD_REBIRTH, "弃道重修（7天一次）")
     @require_whitelist

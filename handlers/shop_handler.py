@@ -94,8 +94,12 @@ class ShopHandler:
     async def _find_item_in_pavilions(self, item_name: str):
         """在所有阁楼中查找物品"""
         for pavilion_id in ["pill_pavilion", "weapon_pavilion", "treasure_pavilion"]:
-            _, items = await self.db.get_shop_data(pavilion_id)
+            last_refresh, items = await self.db.get_shop_data(pavilion_id)
             if items:
+                updated = self.shop_manager.ensure_items_have_stock(items)
+                updated = self.shop_manager.ensure_items_have_market_ids(items, pavilion_id) or updated
+                if updated:
+                    await self.db.update_shop_data(pavilion_id, last_refresh, items)
                 for item in items:
                     same_name = item.get('name') == item_name
                     same_code = str(item.get('market_id', '')).upper() == item_name.strip().upper()
@@ -131,8 +135,7 @@ class ShopHandler:
         if quantity == 1:
             try:
                 raw_msg = event.get_message_str().strip()
-                if raw_msg.startswith("购买"):
-                    raw_msg = raw_msg[len("购买"):].strip()
+                raw_msg = re.sub(r"^[=/！!]?购买(?:物品)?\s*", "", raw_msg, count=1)
                 raw_msg = raw_msg.replace("　", " ")
                 raw_msg = raw_msg.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
                 item_part, quantity = parse_qty(raw_msg)
@@ -219,6 +222,11 @@ class ShopHandler:
                 yield event.plain_result(f"未知的物品类型：{item_type}")
                 return
 
+            player = await self.db.get_player_by_id(event.get_sender_id())
+            if not player:
+                await self.db.conn.rollback()
+                yield event.plain_result("购买失败：玩家数据不存在。")
+                return
             player.gold -= total_price
             await self.db.update_player(player)
             await self.db.conn.commit()
@@ -284,17 +292,21 @@ class ShopHandler:
             if 'add_hp' in effects:
                 hp_change = effects['add_hp']
                 if player.cultivation_type == "体修":
+                    if player.max_blood_qi <= 0:
+                        player.max_blood_qi = max(100, 50 + player.level_index * 20)
                     old_blood = player.blood_qi
                     player.blood_qi = max(0, min(player.max_blood_qi, player.blood_qi + hp_change))
                     if hp_change > 0:
-                        effect_msgs.append(f"气血+{player.blood_qi - old_blood}")
+                        actual_gain = player.blood_qi - old_blood
+                        effect_msgs.append(f"气血+{actual_gain}" if actual_gain else "气血已满")
                     else:
                         effect_msgs.append(f"气血{hp_change}")
                 else:
                     old_qi = player.spiritual_qi
                     player.spiritual_qi = max(0, min(player.max_spiritual_qi, player.spiritual_qi + hp_change))
                     if hp_change > 0:
-                        effect_msgs.append(f"灵气+{player.spiritual_qi - old_qi}")
+                        actual_gain = player.spiritual_qi - old_qi
+                        effect_msgs.append(f"灵气+{actual_gain}" if actual_gain else "灵气已满")
                     else:
                         effect_msgs.append(f"灵气{hp_change}")
 

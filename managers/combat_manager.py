@@ -193,7 +193,7 @@ class CombatManager:
             player2_final_hp = player2.max_hp
             player2_final_mp = player2.max_mp
         else:
-            # 决斗消耗HP/MP，战败者HP降为1
+            # 决斗消耗HP/MP，保留真实战斗结果
             player1_final_hp = max(1, player1.hp) if player1.hp > 0 else 1
             player1_final_mp = player1.mp
             player2_final_hp = max(1, player2.hp) if player2.hp > 0 else 1
@@ -288,7 +288,7 @@ class CombatManager:
         return {
             "winner": winner,
             "combat_log": combat_log,
-            "player_final_hp": max(1, player.hp),  # 战败者HP降为1
+            "player_final_hp": max(0, player.hp),
             "player_final_mp": player.mp,
             "boss_final_hp": max(0, boss.hp),
             "reward": reward,

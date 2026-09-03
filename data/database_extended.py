@@ -264,6 +264,22 @@ class DatabaseExtended:
             (boss_id,)
         )
         await self.conn.commit()
+
+    async def record_boss_damage(self, boss_id: int, user_id: str, damage: int):
+        await self.conn.execute(
+            "INSERT INTO boss_damage (boss_id, user_id, damage) VALUES (?, ?, ?) "
+            "ON CONFLICT(boss_id, user_id) DO UPDATE SET damage = damage + excluded.damage",
+            (boss_id, user_id, damage),
+        )
+        await self.conn.commit()
+
+    async def get_boss_damage_ranking(self, boss_id: int):
+        async with self.conn.execute(
+            "SELECT d.user_id, p.user_name, d.damage FROM boss_damage d "
+            "LEFT JOIN players p ON p.user_id = d.user_id WHERE d.boss_id = ? "
+            "ORDER BY d.damage DESC, d.user_id LIMIT 20", (boss_id,)
+        ) as cursor:
+            return await cursor.fetchall()
     
     # ===== 秘境系统 CRUD =====
     

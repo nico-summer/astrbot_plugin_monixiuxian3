@@ -1,6 +1,7 @@
 # handlers/combat_handlers.py
 import re
 import time
+import random
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.all import *
 from ..managers.combat_manager import CombatManager, CombatStats
@@ -110,7 +111,7 @@ class CombatHandlers:
             
         return bonus
 
-    async def _prepare_combat_stats(self, user_id: str) -> CombatStats:
+    async def _prepare_combat_stats(self, user_id: str, restore: bool = False) -> CombatStats:
         player = await self.db.get_player_by_id(user_id)
         if not player:
             return None
@@ -123,12 +124,23 @@ class CombatHandlers:
         atk_buff = impart_info.impart_atk_per if impart_info else 0.0
         
         # 计算属性
-        hp, mp = self.combat_mgr.calculate_hp_mp(player.experience, hp_buff, mp_buff)
+        max_hp, max_mp = self.combat_mgr.calculate_hp_mp(player.experience, hp_buff, mp_buff)
+        hp, mp = (max_hp, max_mp) if restore or player.atk == 0 else (player.hp, player.mp)
         base_atk = self.combat_mgr.calculate_atk(player.experience, player.atkpractice, atk_buff)
+        active_effects = player.get_active_pill_effects()
+        now = int(time.time())
+        for effect in active_effects:
+            if effect.get("expiry_time", 0) > now and effect.get("subtype") in {"duel_debuff", "duel_buff"}:
+                base_atk = int(base_atk * effect.get("attack_multiplier", 1.0))
         
         # 加上装备加成
         equip_bonus = self._calculate_equipment_bonus(player)
         final_atk = base_atk + equip_bonus["atk"]
+        defense_multiplier = 1.0
+        for effect in active_effects:
+            if effect.get("expiry_time", 0) > now and effect.get("subtype") in {"duel_debuff", "duel_buff"}:
+                defense_multiplier *= effect.get("defense_multiplier", 1.0)
+        final_defense = int(equip_bonus["defense"] * defense_multiplier)
         
         # 更新Player对象（可选，为了持久化）
         player.hp = hp
@@ -144,7 +156,7 @@ class CombatHandlers:
             mp=mp,
             max_mp=mp,
             atk=final_atk,
-            defense=equip_bonus["defense"],
+            defense=final_defense,
             exp=player.experience
         )
 
@@ -185,8 +197,8 @@ class CombatHandlers:
             return
 
         # 获取双方数据
-        p1_stats = await self._prepare_combat_stats(user_id)
-        p2_stats = await self._prepare_combat_stats(target_id)
+        p1_stats = await self._prepare_combat_stats(user_id, restore=False)
+        p2_stats = await self._prepare_combat_stats(target_id, restore=False)
         
         if not p1_stats:
             yield event.plain_result("❌ 你还未踏入修仙之路")
@@ -201,13 +213,51 @@ class CombatHandlers:
         # 结算（更新HP）
         await self.db.ext.update_player_hp_mp(user_id, result['player1_final_hp'], result['player1_final_mp'])
         await self.db.ext.update_player_hp_mp(target_id, result['player2_final_hp'], result['player2_final_mp'])
+
+        loser_id = target_id if result["winner"] == user_id else user_id
+        winner_reward_msg = ""
+        if result["winner"] in {user_id, target_id}:
+            loser = await self.db.get_player_by_id(loser_id)
+            winner = await self.db.get_player_by_id(result["winner"])
+            effects = loser.get_active_pill_effects()
+            effects.append({
+                "pill_name": "决斗负伤",
+                "subtype": "duel_debuff",
+                "expiry_time": int(time.time()) + 3600,
+                "attack_multiplier": 0.8,
+                "defense_multiplier": 0.8,
+            })
+            loser.set_active_pill_effects(effects)
+            await self.db.update_player(loser)
+
+            if loser.gold >= 100:
+                stolen_gold = random.randint(100, min(1000, loser.gold))
+                loser.gold -= stolen_gold
+                winner.gold += stolen_gold
+                winner_reward_msg = f"🏆 决斗奖励：从败者处获得 {stolen_gold:,} 灵石。"
+            else:
+                winner_effects = winner.get_active_pill_effects()
+                winner_effects.append({
+                    "pill_name": "决斗胜势",
+                    "subtype": "duel_buff",
+                    "expiry_time": int(time.time()) + 3600,
+                    "attack_multiplier": 1.2,
+                    "defense_multiplier": 1.2,
+                })
+                winner.set_active_pill_effects(winner_effects)
+                winner_reward_msg = "🏆 决斗奖励：败者灵石不足，获得【胜势】状态，攻击与防御提高20%，持续1小时。"
+            await self.db.update_player(loser)
+            await self.db.update_player(winner)
         
         # 更新冷却
         await self._update_combat_cooldown(user_id, "duel")
         
         # 生成战报
         log = "\n".join(result['combat_log'])
-        yield event.plain_result(f"{log}")
+        log += "\n\n⚠️ 决斗败者获得【负伤】状态：攻击与防御降低20%，持续1小时。"
+        if winner_reward_msg:
+            log += f"\n{winner_reward_msg}"
+        yield event.plain_result(log)
 
     async def handle_spar(self, event: AstrMessageEvent, target: str):
         """切磋 (不消耗气血)"""
@@ -245,8 +295,8 @@ class CombatHandlers:
             yield event.plain_result(f"❌ 切磋冷却中，还需 {remaining} 秒")
             return
 
-        p1_stats = await self._prepare_combat_stats(user_id)
-        p2_stats = await self._prepare_combat_stats(target_id)
+        p1_stats = await self._prepare_combat_stats(user_id, restore=True)
+        p2_stats = await self._prepare_combat_stats(target_id, restore=True)
         
         if not p1_stats or not p2_stats:
              yield event.plain_result("❌ 双方都需要踏入修仙之路")
