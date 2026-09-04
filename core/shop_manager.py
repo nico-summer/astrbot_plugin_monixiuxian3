@@ -450,6 +450,18 @@ class ShopManager:
                 effects.append(f"物伤+{data['physical_damage']}")
             if data.get('magic_damage', 0) > 0:
                 effects.append(f"法伤+{data['magic_damage']}")
+            if data.get('physical_defense', 0) > 0:
+                effects.append(f"物防+{data['physical_defense']}")
+            if data.get('magic_defense', 0) > 0:
+                effects.append(f"法防+{data['magic_defense']}")
+            if data.get('mental_power', 0) > 0:
+                effects.append(f"精神力+{data['mental_power']}")
+            if data.get('lifespan', 0) > 0:
+                effects.append(f"寿命+{data['lifespan']}")
+            if data.get('spiritual_qi', 0) > 0:
+                effects.append(f"灵气容量+{data['spiritual_qi']}")
+            if data.get('blood_qi', 0) > 0:
+                effects.append(f"气血容量+{data['blood_qi']}")
         
         # 丹药效果
         elif item_type in ['pill', 'exp_pill', 'utility_pill', 'legacy_pill']:
@@ -474,8 +486,28 @@ class ShopManager:
                     effects.append(f"突破成功率+{int(bonus*100)}%")
             
             # 修为丹
-            if data.get('exp_boost', 0) > 0:
-                effects.append(f"修为+{data['exp_boost']}")
+            exp_gain = data.get('exp_gain', data.get('exp_boost', 0))
+            if exp_gain > 0:
+                effects.append(f"修为+{exp_gain}")
+
+            direct_effects = [
+                ('cultivation_multiplier', '修炼速度', 'percent'),
+                ('physical_damage_multiplier', '物伤倍率', 'percent'),
+                ('magic_damage_multiplier', '法伤倍率', 'percent'),
+                ('physical_defense_multiplier', '物防倍率', 'percent'),
+                ('magic_defense_multiplier', '法防倍率', 'percent'),
+                ('physical_damage_gain', '物伤', 'number'),
+                ('magic_damage_gain', '法伤', 'number'),
+                ('physical_defense_gain', '物防', 'number'),
+                ('magic_defense_gain', '法防', 'number'),
+                ('mental_power_gain', '精神力', 'number'),
+                ('lifespan_gain', '寿命', 'number'),
+            ]
+            for key, label, value_type in direct_effects:
+                value = data.get(key, 0)
+                if value:
+                    formatted = f"{value:+.0%}" if value_type == 'percent' else f"{value:+d}"
+                    effects.append(f"{label}{formatted}")
         
         # 材料
         elif item_type == 'material':
@@ -522,6 +554,10 @@ class ShopManager:
                 attrs.append(f"物防+{data['physical_defense']}")
             if data.get('mental_power', 0) > 0:
                 attrs.append(f"精神力+{data['mental_power']}")
+            if data.get('lifespan', 0) > 0:
+                attrs.append(f"寿命+{data['lifespan']}")
+            if data.get('blood_qi', 0) > 0:
+                attrs.append(f"气血+{data['blood_qi']}")
             if attrs:
                 details.append(f"属性: {', '.join(attrs)}")
             if 'required_level_index' in data:
@@ -579,11 +615,19 @@ class ShopManager:
                     effect_desc.append("死亡时自动复活（属性减半）")
                 elif effect_type == 'temporary':
                     duration = data.get('duration_minutes', 0)
-                    mult = data.get('cultivation_multiplier', 0)
-                    if mult > 0:
-                        effect_desc.append(f"修炼速度+{int(mult * 100)}% 持续 {duration} 分钟")
-                    if data.get('physical_damage_multiplier'):
-                        effect_desc.append(f"物伤倍率+{data['physical_damage_multiplier']:.0%}")
+                    for key, label in [
+                        ('cultivation_multiplier', '修炼速度'),
+                        ('physical_damage_multiplier', '物伤倍率'),
+                        ('magic_damage_multiplier', '法伤倍率'),
+                        ('physical_defense_multiplier', '物防倍率'),
+                        ('magic_defense_multiplier', '法防倍率'),
+                    ]:
+                        value = data.get(key, 0)
+                        if value:
+                            effect_desc.append(f"{label}{value:+.0%}")
+                    if data.get('is_random'):
+                        effect_desc.append("随机一项攻防倍率+500%，其余-90%")
+                    effect_desc.append(f"持续时间：{duration}分钟")
                 elif effect_type == 'permanent':
                     gains = []
                     for attr_key, label in [
@@ -591,7 +635,10 @@ class ShopManager:
                         ('magic_damage_gain', '法伤'),
                         ('physical_defense_gain', '物防'),
                         ('magic_defense_gain', '法防'),
-                        ('mental_power_gain', '精神力')
+                        ('mental_power_gain', '精神力'),
+                        ('lifespan_gain', '寿命'),
+                        ('max_spiritual_qi_gain', '最大灵气'),
+                        ('max_blood_qi_gain', '最大气血')
                     ]:
                         value = data.get(attr_key)
                         if value:
@@ -599,6 +646,12 @@ class ShopManager:
                             gains.append(f"{label}{sign}{value}")
                     if gains:
                         effect_desc.append("永久增益：" + "，".join(gains))
+                    if data.get('cultivation_multiplier'):
+                        effect_desc.append(f"永久修炼速度{data['cultivation_multiplier']:+.0%}")
+                    if data.get('death_protection_multiplier'):
+                        effect_desc.append(f"突破死亡概率降低{1 - data['death_protection_multiplier']:.0%}")
+                    if data.get('base_attribute_limit_increase'):
+                        effect_desc.append(f"永久属性丹药上限提高{data['base_attribute_limit_increase']:.0%}")
                 if data.get('resets_permanent_pills'):
                     refund_ratio = data.get('reset_refund_ratio', 0)
                     hint = "重置所有永久丹药增益"

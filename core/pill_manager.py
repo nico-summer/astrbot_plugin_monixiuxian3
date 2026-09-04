@@ -1,5 +1,6 @@
 # core/pill_manager.py
 
+import random
 import time
 from typing import Dict, List, Optional, Tuple
 from astrbot.api import logger
@@ -67,6 +68,115 @@ class PillManager:
             return pill
 
         return None
+
+    @staticmethod
+    def format_effect_values(data: dict) -> List[str]:
+        """按实际参与结算的字段生成效果说明。"""
+        lines = []
+        if data.get("subtype") == "exp":
+            lines.append(f"修为 {data.get('exp_gain', 0):+d}")
+        gain_labels = {
+            "physical_damage_gain": "物伤", "magic_damage_gain": "法伤",
+            "physical_defense_gain": "物防", "magic_defense_gain": "法防",
+            "mental_power_gain": "精神力", "lifespan_gain": "寿命",
+            "max_spiritual_qi_gain": "最大灵气", "max_blood_qi_gain": "最大气血",
+        }
+        for key, label in gain_labels.items():
+            if data.get(key):
+                lines.append(f"{label} {data[key]:+d}")
+        multiplier_labels = {
+            "cultivation_multiplier": "修炼速度",
+            "physical_damage_multiplier": "物伤倍率",
+            "magic_damage_multiplier": "法伤倍率",
+            "physical_defense_multiplier": "物防倍率",
+            "magic_defense_multiplier": "法防倍率",
+            "breakthrough_bonus": "突破成功率",
+        }
+        for key, label in multiplier_labels.items():
+            if data.get(key):
+                lines.append(f"{label} {data[key]:+.0%}")
+        periodic_labels = {
+            "lifespan_cost_per_minute": ("每分钟寿命", -1),
+            "lifespan_regen_per_minute": ("每分钟寿命", 1),
+            "spiritual_qi_regen_per_minute": ("每分钟灵气", 1),
+            "blood_qi_regen_per_minute": ("每分钟气血", 1),
+            "blood_qi_cost_per_minute": ("每分钟气血", -1),
+        }
+        for key, (label, sign) in periodic_labels.items():
+            if data.get(key):
+                lines.append(f"{label} {sign * data[key]:+d}")
+        if data.get("subtype") == "resurrection":
+            lines.append("抵消一次死亡，复活后属性减半")
+        if data.get("blocks_next_debuff"):
+            lines.append("抵消下一次负面效果")
+        if "spiritual_qi_restore" in data:
+            value = data["spiritual_qi_restore"]
+            lines.append("灵气/气血恢复至满" if value == -1 else f"灵气/气血恢复 +{value}")
+        if "blood_qi_restore" in data:
+            value = data["blood_qi_restore"]
+            lines.append("气血恢复至满" if value == -1 else f"气血恢复 +{value}")
+        if data.get("resets_permanent_pills"):
+            lines.append(f"重置永久丹药属性，并返还本丹药价格的 {data.get('reset_refund_ratio', 0.5):.0%}")
+        if data.get("death_protection_multiplier"):
+            lines.append(f"突破死亡概率降低 {1 - data['death_protection_multiplier']:.0%}")
+        if data.get("base_attribute_limit_increase"):
+            lines.append(f"永久属性丹药上限提高 {data['base_attribute_limit_increase']:.0%}")
+        if data.get("is_random"):
+            lines.append("随机一项攻防倍率 +500%，其余攻防倍率 -90%")
+        duration = data.get("duration_minutes", 0)
+        if duration:
+            lines.append(f"持续 {duration} 分钟")
+        return lines
+
+    def get_permanent_buff_lines(self, player: Player) -> List[str]:
+        permanent_gains = player.get_permanent_pill_gains()
+        if not permanent_gains:
+            return []
+        totals = {}
+        sources = {}
+        for gain in permanent_gains.values():
+            if not isinstance(gain, dict):
+                continue
+            for key, value in gain.items():
+                if key == "_sources" and isinstance(value, dict):
+                    for name, count in value.items():
+                        sources[name] = sources.get(name, 0) + count
+                elif isinstance(value, (int, float)):
+                    totals[key] = totals.get(key, 0) + value
+        lines = ["来源：" + ("、".join(f"{name}×{count}" for name, count in sources.items()) if sources else "旧存档未记录具体丹药名称")]
+        labels = {
+            "physical_damage": "物伤", "magic_damage": "法伤",
+            "physical_defense": "物防", "magic_defense": "法防",
+            "mental_power": "精神力", "lifespan": "寿命",
+            "max_spiritual_qi": "最大灵气", "max_blood_qi": "最大气血",
+        }
+        for key, label in labels.items():
+            if totals.get(key):
+                lines.append(f"{label} {totals[key]:+g}")
+        if totals.get("cultivation_multiplier"):
+            lines.append(f"修炼速度 {totals['cultivation_multiplier']:+.0%}")
+        if totals.get("base_attribute_limit_increase"):
+            lines.append(f"永久属性丹药上限 {totals['base_attribute_limit_increase']:+.0%}")
+        death_multiplier = 1.0
+        for gain in permanent_gains.values():
+            if isinstance(gain, dict):
+                death_multiplier *= gain.get("death_protection_multiplier", 1.0)
+        if death_multiplier < 1.0:
+            lines.append(f"突破死亡概率降低 {(1 - death_multiplier):.0%}")
+        return lines
+
+    def get_temporary_buff_lines(self, player: Player) -> List[str]:
+        current_time = int(time.time())
+        lines = []
+        for effect in player.get_active_pill_effects():
+            expiry_time = effect.get("expiry_time", 0)
+            if expiry_time and expiry_time <= current_time:
+                continue
+            remaining = max(0, expiry_time - current_time)
+            time_text = f"剩余{remaining // 3600}小时{remaining % 3600 // 60}分钟" if remaining >= 3600 else f"剩余{remaining // 60}分钟"
+            values = [value for value in self.format_effect_values(effect) if not value.startswith("持续 ")]
+            lines.append(f"{effect.get('pill_name', '未知效果')}：{'、'.join(values) or '特殊效果'}（{time_text}）")
+        return lines
 
     async def update_temporary_effects(self, player: Player):
         """更新临时丹药效果，移除过期效果
@@ -216,6 +326,17 @@ class PillManager:
             "last_tick_time": current_time,
         }
 
+        if pill_data.get("is_random"):
+            random_key = random.choice([
+                "physical_damage_multiplier", "magic_damage_multiplier",
+                "physical_defense_multiplier", "magic_defense_multiplier",
+            ])
+            for key in [
+                "physical_damage_multiplier", "magic_damage_multiplier",
+                "physical_defense_multiplier", "magic_defense_multiplier",
+            ]:
+                effect[key] = 5.0 if key == random_key else -0.9
+
         # 添加具体效果数据
         effect_keys = [
             "cultivation_multiplier", "physical_damage_multiplier", "magic_damage_multiplier",
@@ -242,70 +363,8 @@ class PillManager:
 
         await self.db.update_player(player)
 
-        # 构建效果描述
-        effect_desc = []
-        if "cultivation_multiplier" in pill_data:
-            mult = pill_data["cultivation_multiplier"]
-            if mult > 0:
-                effect_desc.append(f"修炼速度+{mult:.0%}")
-            else:
-                effect_desc.append(f"修炼速度{mult:.0%}")
-
-        if "physical_damage_multiplier" in pill_data:
-            mult = pill_data["physical_damage_multiplier"]
-            if mult > 0:
-                effect_desc.append(f"物伤+{mult:.0%}")
-            else:
-                effect_desc.append(f"物伤{mult:.0%}")
-
-        if "magic_damage_multiplier" in pill_data:
-            mult = pill_data["magic_damage_multiplier"]
-            if mult > 0:
-                effect_desc.append(f"法伤+{mult:.0%}")
-            else:
-                effect_desc.append(f"法伤{mult:.0%}")
-
-        if "physical_defense_multiplier" in pill_data:
-            mult = pill_data["physical_defense_multiplier"]
-            if mult > 0:
-                effect_desc.append(f"物防+{mult:.0%}")
-            else:
-                effect_desc.append(f"物防{mult:.0%}")
-
-        if "magic_defense_multiplier" in pill_data:
-            mult = pill_data["magic_defense_multiplier"]
-            if mult > 0:
-                effect_desc.append(f"法防+{mult:.0%}")
-            else:
-                effect_desc.append(f"法防{mult:.0%}")
-
-        if "lifespan_cost_per_minute" in pill_data:
-            cost = pill_data["lifespan_cost_per_minute"]
-            effect_desc.append(f"每分钟扣除寿命-{cost}")
-
-        if "lifespan_regen_per_minute" in pill_data:
-            regen = pill_data["lifespan_regen_per_minute"]
-            effect_desc.append(f"每分钟恢复寿命+{regen}")
-
-        if "spiritual_qi_regen_per_minute" in pill_data:
-            regen = pill_data["spiritual_qi_regen_per_minute"]
-            effect_desc.append(f"每分钟恢复灵气+{regen}")
-
-        if "blood_qi_regen_per_minute" in pill_data:
-            regen = pill_data["blood_qi_regen_per_minute"]
-            effect_desc.append(f"每分钟恢复气血+{regen}")
-
-        if "blood_qi_cost_per_minute" in pill_data:
-            cost = pill_data["blood_qi_cost_per_minute"]
-            effect_desc.append(f"每分钟扣除气血-{cost}")
-
-        if "breakthrough_bonus" in pill_data:
-            bonus = pill_data["breakthrough_bonus"]
-            if bonus > 0:
-                effect_desc.append(f"突破成功率+{bonus:.0%}")
-            else:
-                effect_desc.append(f"突破成功率{bonus:.0%}")
-
+        # 使用实际写入玩家状态的效果生成提示，随机丹药会展示本次抽取结果
+        effect_desc = [value for value in self.format_effect_values(effect) if not value.startswith("持续 ")]
         effects_str = "、".join(effect_desc) if effect_desc else "特殊效果"
 
         return True, (
@@ -364,7 +423,12 @@ class PillManager:
             if gain > 0:
                 current_gain = permanent_gains[level_key].get(attr_key, 0)
                 base_value = base_attrs.get(attr_key, 100)  # 默认基础值100
-                limit = base_value * 0.3  # 30%上限
+                limit_bonus = sum(
+                    gain_data.get("base_attribute_limit_increase", 0)
+                    for gain_data in permanent_gains.values()
+                    if isinstance(gain_data, dict)
+                )
+                limit = base_value * (0.3 + limit_bonus)
 
                 if current_gain >= limit:
                     gains_blocked[attr_name] = f"已达上限({limit:.0f})"
@@ -393,6 +457,13 @@ class PillManager:
             permanent_gains[level_key]["cultivation_multiplier"] += cult_mult
             gains_applied["修炼速度"] = f"{cult_mult:+.0%}"
 
+        if "base_attribute_limit_increase" in pill_data:
+            limit_increase = pill_data["base_attribute_limit_increase"]
+            permanent_gains[level_key]["base_attribute_limit_increase"] = (
+                permanent_gains[level_key].get("base_attribute_limit_increase", 0) + limit_increase
+            )
+            gains_applied["永久属性丹药上限"] = f"{limit_increase:+.0%}"
+
         # 处理突破死亡概率降低
         if "death_protection_multiplier" in pill_data:
             death_mult = pill_data["death_protection_multiplier"]
@@ -403,6 +474,9 @@ class PillManager:
 
         if not gains_applied:
             return False, "该丹药的所有属性增益都已达到上限，无法使用！"
+
+        sources = permanent_gains[level_key].setdefault("_sources", {})
+        sources[pill_name] = sources.get(pill_name, 0) + 1
 
         # 修正属性下限与能量上限
         self._ensure_non_negative_attributes(player)
@@ -437,7 +511,12 @@ class PillManager:
                 msg_parts.append(f"  {attr_name} {reason}")
 
         msg_parts.append("━━━━━━━━━━━━━━━")
-        msg_parts.append("注：每个境界的永久属性丹药\n增益最多为基础属性的30%")
+        limit_bonus = sum(
+            gain_data.get("base_attribute_limit_increase", 0)
+            for gain_data in permanent_gains.values()
+            if isinstance(gain_data, dict)
+        )
+        msg_parts.append(f"注：当前境界永久基础属性增益上限为基础值的 {30 + limit_bonus * 100:.0f}%")
 
         return True, "\n".join(msg_parts)
 
@@ -624,10 +703,9 @@ class PillManager:
 
         # 累加永久效果
         permanent_gains = player.get_permanent_pill_gains()
-        level_key = f"level_{player.level_index}"
-        if level_key in permanent_gains:
-            level_gains = permanent_gains[level_key]
-            if "cultivation_multiplier" in level_gains:
+        # 永久增益跨境界持续生效；level_key 仅用于兼容旧数据及属性上限记录
+        for level_gains in permanent_gains.values():
+            if isinstance(level_gains, dict) and "cultivation_multiplier" in level_gains:
                 multipliers["cultivation_speed"] += level_gains["cultivation_multiplier"]
 
         # 确保倍率不为负
@@ -791,9 +869,14 @@ class PillManager:
                     changed = True
 
             if "cultivation_multiplier" in gain:
+                changed = changed or bool(gain["cultivation_multiplier"])
                 gain["cultivation_multiplier"] = 0
             if "death_protection_multiplier" in gain:
+                changed = changed or gain["death_protection_multiplier"] != 1.0
                 gain["death_protection_multiplier"] = 1.0
+            if "base_attribute_limit_increase" in gain:
+                changed = changed or bool(gain["base_attribute_limit_increase"])
+                gain["base_attribute_limit_increase"] = 0
 
         player.set_permanent_pill_gains({})
         return changed

@@ -24,7 +24,7 @@ class ShopHandler:
         'armor': "器阁、Boss 掉落",
         'accessory': "器阁、Boss 掉落",
         'main_technique': "百宝阁稀有刷新",
-        'technique': "百宝阁、Boss 掉落",
+        'technique': "百宝阁刷新购买",
         'material': "历练、秘境、悬赏、灵田收获与百宝阁限量",
     }
 

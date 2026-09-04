@@ -757,6 +757,7 @@
         "type": "功法",
         "rank": "凡品",
         "description": "一部基础的吐纳法门，修炼后可延年益寿。",
+        "lifespan": 30,
         "price": 1000,
         "shop_weight": 1000
     },
@@ -765,6 +766,7 @@
         "type": "功法",
         "rank": "圣品",
         "description": "传说中可焚尽万物的无上功法，此为上卷。",
+        "magic_damage": 180,
         "price": 888888,
         "shop_weight": 100
     },
@@ -773,6 +775,8 @@
         "type": "功法",
         "rank": "帝品",
         "description": "无上秘法，可演化万物，神秘莫测。",
+        "mental_power": 300,
+        "magic_damage": 260,
         "price": 9999999,
         "shop_weight": 20
     },
@@ -781,6 +785,8 @@
         "type": "功法",
         "rank": "珍品",
         "description": "佛门无上炼体功法，修炼后肉身坚不可摧。",
+        "physical_defense": 150,
+        "magic_defense": 100,
         "price": 10000,
         "shop_weight": 100
     },
@@ -788,7 +794,8 @@
         "name": "御风诀",
         "type": "功法",
         "rank": "凡品",
-        "description": "修炼后身轻如燕，提升移动速度（暂无实际效果）。",
+        "description": "修炼后身轻如燕，提升移动速度。",
+        "physical_defense": 20,
         "price": 1200,
         "shop_weight": 1000
     },
@@ -796,7 +803,9 @@
         "name": "龟息功",
         "type": "功法",
         "rank": "凡品",
-        "description": "模拟玄龟呼吸，修炼后气息绵长，提升耐力（暂无实际效果）。",
+        "description": "模拟玄龟呼吸，修炼后气息绵长，提升耐力。",
+        "spiritual_qi": 100,
+        "blood_qi": 100,
         "price": 900,
         "shop_weight": 1000
     },
@@ -804,7 +813,9 @@
         "name": "北冥神功",
         "type": "功法",
         "rank": "珍品",
-        "description": "能吸取他人修为化为己用，霸道无比（暂无实际效果）。",
+        "description": "能吸取他人修为化为己用，霸道无比。",
+        "magic_damage": 100,
+        "mental_power": 180,
         "price": 25000,
         "shop_weight": 100
     },
@@ -813,6 +824,8 @@
         "type": "功法",
         "rank": "珍品",
         "description": "至刚至阳的内功心法，百毒不侵。",
+        "physical_damage": 120,
+        "physical_defense": 80,
         "price": 22000,
         "shop_weight": 100
     },
@@ -821,6 +834,8 @@
         "type": "功法",
         "rank": "帝品",
         "description": "阐述了天地至理的无上经文，为万法之源。",
+        "magic_damage": 300,
+        "mental_power": 500,
         "price": 7777777,
         "shop_weight": 20
     },
@@ -829,6 +844,8 @@
         "type": "功法",
         "rank": "帝品",
         "description": "魔道无上功法，吞噬万物本源，禁忌的存在。",
+        "physical_damage": 280,
+        "magic_damage": 280,
         "price": 6666666,
         "shop_weight": 20
     }

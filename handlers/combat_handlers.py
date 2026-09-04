@@ -108,6 +108,14 @@ class CombatHandlers:
             data = self.config_manager.items_data[player.armor]
             bonus["defense"] += data.get("physical_defense", 0)
             bonus["defense"] += data.get("magic_defense", 0)
+
+        # 普通功法提供被动攻防加成
+        for technique_name in player.get_techniques_list():
+            data = self.config_manager.items_data.get(technique_name, {})
+            bonus["atk"] += data.get("physical_damage", 0)
+            bonus["atk"] += data.get("magic_damage", 0)
+            bonus["defense"] += data.get("physical_defense", 0)
+            bonus["defense"] += data.get("magic_defense", 0)
             
         return bonus
 

@@ -186,7 +186,7 @@ class PlayerHandler:
             f"【修炼属性】\n"
             f"  修炼方式：{player.cultivation_type}\n"
             f"  状态：{player.state}\n"
-            f"  寿命：{player.lifespan}\n"
+            f"  寿命：{total_attrs['lifespan']}\n"
             f"  精神力：{total_attrs['mental_power']}\n"
         )
         
@@ -219,6 +219,24 @@ class PlayerHandler:
             f"  所在宗门：{sect_name}\n"
             f"  宗门职位：{position_name}\n"
         )
+
+        permanent_buff_lines = self.pill_manager.get_permanent_buff_lines(player)
+        temporary_buff_lines = self.pill_manager.get_temporary_buff_lines(player)
+        reply_msg += "\n【丹药 Buff】\n"
+        if permanent_buff_lines:
+            reply_msg += "  永久增益：\n" + "".join(f"    • {line}\n" for line in permanent_buff_lines)
+        else:
+            reply_msg += "  永久增益：无\n"
+        if temporary_buff_lines:
+            reply_msg += "  临时效果：\n" + "".join(f"    • {line}\n" for line in temporary_buff_lines)
+        else:
+            reply_msg += "  临时效果：无\n"
+        special_effects = []
+        if player.has_resurrection_pill:
+            special_effects.append("回生丹：抵消下一次死亡")
+        if player.has_debuff_shield:
+            special_effects.append("定魂护盾：抵消下一次负面效果")
+        reply_msg += f"  特殊效果：{'、'.join(special_effects) if special_effects else '无'}\n"
         
         # 获取贷款信息
         loan = await self.db.ext.get_active_loan(player.user_id)

@@ -32,6 +32,7 @@ class Item:
     exp_multiplier: float = 0.0  # 修为倍率加成（仅心法有效）
     spiritual_qi: int = 0  # 灵气加成（仅心法有效，灵修）
     blood_qi: int = 0  # 气血加成（仅心法有效，体修）
+    lifespan: int = 0
 
     def get_attribute_display(self) -> str:
         """获取属性加成的显示文本"""
@@ -52,6 +53,8 @@ class Item:
             attrs.append(f"灵气+{self.spiritual_qi}")
         if self.blood_qi > 0:
             attrs.append(f"气血+{self.blood_qi}")
+        if self.lifespan > 0:
+            attrs.append(f"寿命+{self.lifespan}")
         return "、".join(attrs) if attrs else "无属性加成"
 
 @dataclass
@@ -212,6 +215,7 @@ class Player:
             "magic_defense": self.magic_defense,
             "physical_defense": self.physical_defense,
             "mental_power": self.mental_power,
+            "lifespan": self.lifespan,
             "exp_multiplier": 0.0,  # 基础修为倍率为0，只来自心法
         }
 
@@ -222,10 +226,12 @@ class Player:
             total["magic_defense"] += item.magic_defense
             total["physical_defense"] += item.physical_defense
             total["mental_power"] += item.mental_power
+            total["lifespan"] += item.lifespan
 
-            # 心法专属属性
+            # 心法提供修为倍率；心法和普通功法都可提供能量容量
             if item.item_type == "main_technique":
                 total["exp_multiplier"] += item.exp_multiplier
+            if item.item_type in {"main_technique", "technique"}:
                 total["max_spiritual_qi"] += item.spiritual_qi
                 total["max_blood_qi"] += item.blood_qi
 

@@ -67,6 +67,8 @@ class EquipmentHandler:
             physical_defense_bonus = total_attrs["physical_defense"] - player.physical_defense
             mental_power_bonus = total_attrs["mental_power"] - player.mental_power
             max_spiritual_qi_bonus = total_attrs["max_spiritual_qi"] - player.max_spiritual_qi
+            max_blood_qi_bonus = total_attrs["max_blood_qi"] - player.max_blood_qi
+            lifespan_bonus = total_attrs["lifespan"] - player.lifespan
             exp_multiplier = total_attrs["exp_multiplier"]
 
             if magic_damage_bonus > 0:
@@ -81,6 +83,10 @@ class EquipmentHandler:
                 equipment_lines.append(f"🧠 精神力 +{mental_power_bonus}\n")
             if max_spiritual_qi_bonus > 0:
                 equipment_lines.append(f"✨ 灵气容量 +{max_spiritual_qi_bonus}\n")
+            if max_blood_qi_bonus > 0:
+                equipment_lines.append(f"🩸 气血容量 +{max_blood_qi_bonus}\n")
+            if lifespan_bonus > 0:
+                equipment_lines.append(f"⏳ 寿命 +{lifespan_bonus}\n")
             if exp_multiplier > 0:
                 equipment_lines.append(f"📈 修为倍率 +{exp_multiplier:.1%}\n")
 
@@ -154,7 +160,9 @@ class EquipmentHandler:
             physical_defense=item_config.get("physical_defense", 0),
             mental_power=item_config.get("mental_power", 0),
             exp_multiplier=item_config.get("exp_multiplier", 0.0),
-            spiritual_qi=item_config.get("spiritual_qi", 0)
+            spiritual_qi=item_config.get("spiritual_qi", 0),
+            blood_qi=item_config.get("blood_qi", 0),
+            lifespan=item_config.get("lifespan", 0)
         )
 
         # 装备物品
