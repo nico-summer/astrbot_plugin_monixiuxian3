@@ -5,7 +5,7 @@
 
 import aiosqlite
 import json
-from typing import List, Optional
+from typing import Dict, List, Optional
 from ..models_extended import (
     Sect, BuffInfo, Boss, Rift, ImpartInfo, UserCd
 )
@@ -277,9 +277,123 @@ class DatabaseExtended:
         async with self.conn.execute(
             "SELECT d.user_id, p.user_name, d.damage FROM boss_damage d "
             "LEFT JOIN players p ON p.user_id = d.user_id WHERE d.boss_id = ? "
-            "ORDER BY d.damage DESC, d.user_id LIMIT 20", (boss_id,)
+            "ORDER BY d.damage DESC, d.user_id", (boss_id,)
         ) as cursor:
             return await cursor.fetchall()
+
+    async def settle_defeated_boss(
+        self,
+        boss_id: int,
+        rewards: Dict[str, int],
+        winner_id: str,
+        winner_hp: int,
+        winner_mp: int,
+    ):
+        """原子完成Boss击杀、全员奖励和击杀者战斗属性结算。"""
+        try:
+            await self.conn.execute(
+                "UPDATE boss SET status = 0 WHERE boss_id = ?",
+                (boss_id,)
+            )
+            reward_rows = [
+                (amount, user_id)
+                for user_id, amount in rewards.items()
+                if amount > 0
+            ]
+            if reward_rows:
+                await self.conn.executemany(
+                    "UPDATE players SET gold = gold + ? WHERE user_id = ?",
+                    reward_rows,
+                )
+            await self.conn.execute(
+                "UPDATE players SET hp = ?, mp = ? WHERE user_id = ?",
+                (winner_hp, winner_mp, winner_id)
+            )
+            await self.conn.commit()
+        except Exception:
+            await self.conn.rollback()
+            raise
+
+    async def settle_failed_boss_challenge(
+        self,
+        boss_id: int,
+        boss_hp: int,
+        user_id: str,
+        reward: int,
+        player_hp: int,
+        player_mp: int,
+    ):
+        """原子保存Boss剩余血量、安慰奖和玩家战斗属性。"""
+        try:
+            await self.conn.execute(
+                "UPDATE boss SET hp = ? WHERE boss_id = ?",
+                (boss_hp, boss_id)
+            )
+            if reward > 0:
+                await self.conn.execute(
+                    "UPDATE players SET gold = gold + ? WHERE user_id = ?",
+                    (reward, user_id)
+                )
+            await self.conn.execute(
+                "UPDATE players SET hp = ?, mp = ? WHERE user_id = ?",
+                (player_hp, player_mp, user_id)
+            )
+            await self.conn.commit()
+        except Exception:
+            await self.conn.rollback()
+            raise
+
+    async def refine_storage_material(
+        self,
+        user_id: str,
+        item_name: str,
+        count: int,
+        gold_gain: int,
+        experience_gain: int,
+    ):
+        """原子扣除储物戒材料并发放炼化收益。"""
+        try:
+            await self.conn.execute("BEGIN IMMEDIATE")
+            async with self.conn.execute(
+                "SELECT storage_ring_items FROM players WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                await self.conn.rollback()
+                return False, 0
+
+            items = json.loads(row["storage_ring_items"] or "{}")
+            current_count = int(items.get(item_name, 0))
+            if count <= 0 or current_count < count:
+                await self.conn.rollback()
+                return False, current_count
+
+            remaining = current_count - count
+            if remaining > 0:
+                items[item_name] = remaining
+            else:
+                items.pop(item_name, None)
+
+            max_value = 2**63 - 1
+            await self.conn.execute(
+                "UPDATE players SET storage_ring_items = ?, "
+                "gold = MIN(gold + ?, ?), experience = MIN(experience + ?, ?) "
+                "WHERE user_id = ?",
+                (
+                    json.dumps(items, ensure_ascii=False),
+                    gold_gain,
+                    max_value,
+                    experience_gain,
+                    max_value,
+                    user_id,
+                )
+            )
+            await self.conn.commit()
+            return True, remaining
+        except Exception:
+            await self.conn.rollback()
+            raise
     
     # ===== 秘境系统 CRUD =====
     
@@ -447,7 +561,7 @@ class DatabaseExtended:
             (hp, mp, user_id)
         )
         await self.conn.commit()
-    
+
     async def update_player_sect_info(self, user_id: str, sect_id: int, sect_position: int):
         """更新玩家宗门信息"""
         await self.conn.execute(

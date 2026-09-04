@@ -4,6 +4,7 @@ Boss系统管理器 - 处理Boss生成、战斗、奖励等逻辑
 参照NoneBot2插件的xiuxian_boss实现
 """
 
+import asyncio
 import random
 import time
 from typing import Tuple, Dict, Optional, List, TYPE_CHECKING
@@ -66,6 +67,26 @@ class BossManager:
         self.storage_ring_manager = storage_ring_manager
         self.config = config_manager.boss_config if config_manager else {}
         self.levels = self.config.get("levels", self.BOSS_LEVELS)
+        self._challenge_lock = asyncio.Lock()
+
+    @staticmethod
+    def _calculate_damage_rewards(ranking, total_reward: int) -> Dict[str, int]:
+        """按累计伤害分配完整奖励池，余数按伤害排名依次补齐。"""
+        total_damage = sum(row["damage"] for row in ranking)
+        if total_damage <= 0 or total_reward <= 0:
+            return {row["user_id"]: 0 for row in ranking}
+
+        rewards = {
+            row["user_id"]: total_reward * row["damage"] // total_damage
+            for row in ranking
+        }
+        remainder = total_reward - sum(rewards.values())
+        for row in ranking:
+            if remainder <= 0:
+                break
+            rewards[row["user_id"]] += 1
+            remainder -= 1
+        return rewards
     
     async def spawn_boss(
         self,
@@ -158,6 +179,14 @@ ATK：{atk}
         Returns:
             (成功标志, 消息, 战斗结果)
         """
+        async with self._challenge_lock:
+            return await self._challenge_boss_locked(user_id)
+
+    async def _challenge_boss_locked(
+        self,
+        user_id: str
+    ) -> Tuple[bool, str, Optional[Dict]]:
+        """串行处理Boss挑战，避免并发重复扣血和重复结算。"""
         # 1. 检查玩家
         player = await self.db.get_player_by_id(user_id)
         if not player:
@@ -234,7 +263,8 @@ ATK：{atk}
         
         # 5. 开始战斗
         battle_result = self.combat_mgr.player_vs_boss(player_stats, boss_stats)
-        damage_dealt = max(0, boss.max_hp - battle_result["boss_final_hp"])
+        damage_dealt = max(0, boss.hp - battle_result["boss_final_hp"])
+        damage_dealt = min(boss.hp, damage_dealt)
         await self.db.ext.record_boss_damage(boss.boss_id, user_id, damage_dealt)
         
         # 6. 处理战斗结果
@@ -244,16 +274,16 @@ ATK：{atk}
         if winner == user_id:
             # 玩家胜利
             boss.status = 0  # 标记Boss为已击败
-            await self.db.ext.defeat_boss(boss.boss_id)
-            
             ranking = await self.db.ext.get_boss_damage_ranking(boss.boss_id)
-            total_damage = sum(row["damage"] for row in ranking) or 1
-            for row in ranking:
-                participant = await self.db.get_player_by_id(row["user_id"])
-                if participant:
-                    participant.gold += int(boss.stone_reward * row["damage"] / total_damage)
-                    await self.db.update_player(participant)
-            reward = int(boss.stone_reward * next((r["damage"] for r in ranking if r["user_id"] == user_id), 0) / total_damage)
+            rewards = self._calculate_damage_rewards(ranking, boss.stone_reward)
+            reward = rewards.get(user_id, 0)
+            await self.db.ext.settle_defeated_boss(
+                boss.boss_id,
+                rewards,
+                user_id,
+                battle_result["player_final_hp"],
+                battle_result["player_final_mp"],
+            )
             
             # 物品掉落
             item_msg = ""
@@ -286,7 +316,14 @@ HP：{battle_result['player_final_hp']}/{player_stats.max_hp}
         else:
             # 玩家失败
             boss.hp = battle_result["boss_final_hp"]
-            await self.db.ext.update_boss(boss)
+            await self.db.ext.settle_failed_boss_challenge(
+                boss.boss_id,
+                boss.hp,
+                user_id,
+                reward,
+                battle_result["player_final_hp"],
+                battle_result["player_final_mp"],
+            )
             
             result_msg = f"""
 💀 挑战失败
@@ -300,11 +337,6 @@ HP：{battle_result['player_final_hp']}/{player_stats.max_hp}
 {boss.boss_name} 剩余HP：{boss.hp}/{boss.max_hp}
             """.strip()
             
-        # 更新玩家HP/MP
-        player.hp = battle_result["player_final_hp"]
-        player.mp = battle_result["player_final_mp"]
-        await self.db.update_player(player)
-        
         # 返回完整战斗日志
         combat_log = "\n".join(battle_result["combat_log"])
         full_msg = combat_log + "\n\n" + result_msg
@@ -312,10 +344,14 @@ HP：{battle_result['player_final_hp']}/{player_stats.max_hp}
         leaderboard = await self.db.ext.get_boss_damage_ranking(boss.boss_id)
         if leaderboard:
             lines = ["\n📊 本次Boss伤害榜："]
-            total_damage = max(1, boss.max_hp)
-            for index, row in enumerate(leaderboard, 1):
+            total_damage = sum(row["damage"] for row in leaderboard) or 1
+            for index, row in enumerate(leaderboard[:20], 1):
                 ratio = row["damage"] / total_damage * 100
                 lines.append(f"{index}. {row['user_name'] or row['user_id']}：{row['damage']:,} ({ratio:.1f}%)")
+            if len(leaderboard) > 20:
+                other_damage = sum(row["damage"] for row in leaderboard[20:])
+                other_ratio = other_damage / total_damage * 100
+                lines.append(f"其他{len(leaderboard) - 20}位：{other_damage:,} ({other_ratio:.1f}%)")
             full_msg += "\n".join(lines)
         
         return True, full_msg, battle_result
@@ -351,10 +387,13 @@ ATK：{boss.atk}
 
         ranking = await self.db.ext.get_boss_damage_ranking(boss.boss_id)
         if ranking:
-            msg += "\n\n📊 当前伤害榜：\n" + "\n".join(
+            ranking_lines = [
                 f"{i}. {row['user_name'] or row['user_id']}：{row['damage']:,}"
-                for i, row in enumerate(ranking, 1)
-            )
+                for i, row in enumerate(ranking[:20], 1)
+            ]
+            if len(ranking) > 20:
+                ranking_lines.append(f"其余 {len(ranking) - 20} 位参与者已计入最终奖励结算")
+            msg += "\n\n📊 当前伤害榜：\n" + "\n".join(ranking_lines)
         
         return True, msg, boss
     

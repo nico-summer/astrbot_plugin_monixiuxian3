@@ -64,6 +64,8 @@ CMD_ACCEPT_GIFT = "接收"
 CMD_REJECT_GIFT = "拒绝"
 CMD_SEARCH_ITEM = "搜索物品"
 CMD_RETRIEVE_ALL = "取出所有"
+CMD_REFINE_MATERIAL = "炼化材料"
+CMD_REFINE_CATALOG = "炼化图鉴"
 
 # 宗门系统指令
 CMD_CREATE_SECT = "创建宗门"
@@ -795,6 +797,18 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_retrieve_all(self, event: AstrMessageEvent, category: str = ""):
         async for r in self.storage_ring_handler.handle_retrieve_all(event, category):
+            yield r
+
+    @filter.command(CMD_REFINE_MATERIAL, "炼化材料获得灵石与修为")
+    @require_whitelist
+    async def handle_refine_material(self, event: AstrMessageEvent, args: str = ""):
+        async for r in self.storage_ring_handler.handle_refine_material(event, args):
+            yield r
+
+    @filter.command(CMD_REFINE_CATALOG, "查看材料炼化图鉴")
+    @require_whitelist
+    async def handle_refine_catalog(self, event: AstrMessageEvent):
+        async for r in self.storage_ring_handler.handle_refine_catalog(event):
             yield r
 
     # ===== 宗门系统指令 =====

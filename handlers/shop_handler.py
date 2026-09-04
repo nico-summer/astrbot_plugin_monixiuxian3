@@ -255,11 +255,26 @@ class ShopHandler:
 
         item = self.shop_manager.find_item_by_name(item_name.strip())
         if not item:
+            item_data = self.config_manager.items_data.get(item_name.strip())
+            if item_data and item_data.get('type') == '材料' and item_data.get('shop_weight') == 0:
+                item = {
+                    'id': item_data.get('id', item_name.strip()),
+                    'name': item_data['name'],
+                    'type': 'material',
+                    'price': item_data.get('price', 0),
+                    'rank': item_data.get('rank', '凡品'),
+                    'data': item_data,
+                }
+        if not item:
             yield event.plain_result(f"未找到物品【{item_name}】，请检查名称或等待刷新。")
             return
 
         detail_text = self.shop_manager.get_item_details(item)
-        acquire_hint = self._get_acquire_hint(item.get('type', ''))
+        item_data = item.get('data', {})
+        if item.get('type') == 'material' and item_data.get('shop_weight') == 0:
+            acquire_hint = "世界Boss击杀掉落；可使用 /炼化材料 转换为灵石与修为"
+        else:
+            acquire_hint = self._get_acquire_hint(item.get('type', ''))
 
         lines = [
             detail_text,

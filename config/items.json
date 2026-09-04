@@ -548,6 +548,86 @@
         "price": 3600,
         "shop_weight": 100
     },
+    "2015": {
+        "name": "灵兽内丹",
+        "type": "材料",
+        "rank": "凡品",
+        "description": "Boss掉落材料，可炼化为500灵石与2000修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
+    "2016": {
+        "name": "妖兽精血",
+        "type": "材料",
+        "rank": "凡品",
+        "description": "Boss掉落材料，可炼化为350灵石与1400修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
+    "2017": {
+        "name": "玄铁",
+        "type": "材料",
+        "rank": "凡品",
+        "description": "Boss掉落材料，可炼化为300灵石与1200修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
+    "2018": {
+        "name": "星辰石",
+        "type": "材料",
+        "rank": "珍品",
+        "description": "Boss掉落材料，可炼化为900灵石与3600修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
+    "2019": {
+        "name": "天材地宝",
+        "type": "材料",
+        "rank": "珍品",
+        "description": "Boss掉落材料，可炼化为2500灵石与10000修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
+    "2020": {
+        "name": "功法残页",
+        "type": "材料",
+        "rank": "珍品",
+        "description": "Boss掉落材料，可炼化为1800灵石与7200修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
+    "2021": {
+        "name": "混沌精华",
+        "type": "材料",
+        "rank": "圣品",
+        "description": "高级Boss掉落材料，可炼化为8000灵石与32000修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
+    "2022": {
+        "name": "神兽之骨",
+        "type": "材料",
+        "rank": "圣品",
+        "description": "高级Boss掉落材料，可炼化为12000灵石与48000修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
+    "2023": {
+        "name": "远古秘籍",
+        "type": "材料",
+        "rank": "帝品",
+        "description": "高级Boss掉落材料，可炼化为18000灵石与72000修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
+    "2024": {
+        "name": "仙器碎片",
+        "type": "材料",
+        "rank": "帝品",
+        "description": "顶级Boss掉落材料，可炼化为30000灵石与120000修为。",
+        "price": 0,
+        "shop_weight": 0
+    },
     "3001": {
         "name": "青锋剑",
         "type": "法器",

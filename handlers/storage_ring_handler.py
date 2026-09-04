@@ -20,6 +20,21 @@ CMD_STORE_ALL = "存入所有"
 CMD_RETRIEVE_ALL = "取出所有"
 CMD_SEARCH_ITEM = "搜索物品"
 CMD_VIEW_CATEGORY = "查看分类"
+CMD_REFINE_MATERIAL = "炼化材料"
+CMD_REFINE_CATALOG = "炼化图鉴"
+
+MATERIAL_REFINING_VALUES = {
+    "灵兽内丹": (500, 2000),
+    "妖兽精血": (350, 1400),
+    "玄铁": (300, 1200),
+    "星辰石": (900, 3600),
+    "天材地宝": (2500, 10000),
+    "功法残页": (1800, 7200),
+    "混沌精华": (8000, 32000),
+    "神兽之骨": (12000, 48000),
+    "远古秘籍": (18000, 72000),
+    "仙器碎片": (30000, 120000),
+}
 
 # 物品分类定义
 ITEM_CATEGORIES = {
@@ -82,9 +97,71 @@ class StorageRingHandler:
         lines.append(f"存入：{CMD_STORE_ITEM} 物品名 [数量]\n")
         lines.append(f"取出：{CMD_RETRIEVE_ITEM} 物品名 [数量]\n")
         lines.append(f"搜索：{CMD_SEARCH_ITEM} 关键词\n")
+        lines.append(f"炼化：{CMD_REFINE_MATERIAL} 材料名 [数量/全部]\n")
         lines.append(f"升级：{CMD_UPGRADE_RING} 储物戒名")
 
         yield event.plain_result("".join(lines))
+
+    @player_required
+    async def handle_refine_catalog(self, player: Player, event: AstrMessageEvent):
+        """显示Boss材料的明确炼化用途。"""
+        lines = ["=== 材料炼化图鉴 ===\n", "以下Boss材料均可稳定炼化为灵石与修为。\n"]
+        for item_name, (gold, experience) in MATERIAL_REFINING_VALUES.items():
+            lines.append(f"【{item_name}】×1 → 灵石{gold:,} + 修为{experience:,}\n")
+        lines.append(f"\n用法：{CMD_REFINE_MATERIAL} 材料名 数量\n")
+        lines.append(f"示例：{CMD_REFINE_MATERIAL} 仙器碎片 1；{CMD_REFINE_MATERIAL} 功法残页 全部")
+        yield event.plain_result("".join(lines))
+
+    @player_required
+    async def handle_refine_material(self, player: Player, event: AstrMessageEvent, args: str):
+        """炼化Boss材料，发放灵石和修为。"""
+        if not args or not args.strip():
+            yield event.plain_result(
+                f"用法：{CMD_REFINE_MATERIAL} 材料名 [数量/全部]\n"
+                f"使用 {CMD_REFINE_CATALOG} 查看每种材料的炼化价值"
+            )
+            return
+
+        parts = args.strip().rsplit(" ", 1)
+        item_name = parts[0].strip()
+        quantity_text = parts[1].strip() if len(parts) == 2 else "1"
+        if item_name not in MATERIAL_REFINING_VALUES:
+            yield event.plain_result(f"【{item_name}】不是可炼化材料，请使用 {CMD_REFINE_CATALOG} 查看图鉴")
+            return
+
+        available = self.storage_ring_manager.get_item_count(player, item_name)
+        if quantity_text in {"全部", "all", "ALL"}:
+            count = available
+        elif quantity_text.isdigit():
+            count = int(quantity_text)
+        else:
+            yield event.plain_result("数量必须是正整数或“全部”")
+            return
+
+        if count <= 0:
+            yield event.plain_result(f"储物戒中没有【{item_name}】可炼化")
+            return
+        if count > available:
+            yield event.plain_result(f"【{item_name}】数量不足，当前仅有 {available} 个")
+            return
+
+        gold_each, experience_each = MATERIAL_REFINING_VALUES[item_name]
+        gold_gain = gold_each * count
+        experience_gain = experience_each * count
+        success, current_count = await self.db.ext.refine_storage_material(
+            player.user_id,
+            item_name,
+            count,
+            gold_gain,
+            experience_gain,
+        )
+        if not success:
+            yield event.plain_result(f"炼化失败：【{item_name}】数量不足，当前仅有 {current_count} 个")
+            return
+        yield event.plain_result(
+            f"🔥 炼化成功！\n【{item_name}】×{count}\n"
+            f"获得灵石：+{gold_gain:,}\n获得修为：+{experience_gain:,}"
+        )
 
     @player_required
     async def handle_store_item(self, player: Player, event: AstrMessageEvent, args: str):
