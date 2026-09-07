@@ -284,16 +284,19 @@ class XiuXianPlugin(Star):
         await self.db.connect()
         migration_manager = MigrationManager(self.db.conn, self.config_manager)
         await migration_manager.migrate()
-        
+
         # 确保系统配置表存在
         await self.db.ext.ensure_system_config_table()
-        
+
+        # 初始化秘境数据
+        await self._initialize_rifts()
+
         # 启动定时任务
         self.boss_task = asyncio.create_task(self._schedule_boss_spawn())
         self.loan_check_task = asyncio.create_task(self._schedule_loan_check())
         self.spirit_eye_task = asyncio.create_task(self._schedule_spirit_eye_spawn())
         self.bounty_check_task = asyncio.create_task(self._schedule_bounty_check())
-        
+
         logger.info("【修仙插件】已加载。")
 
     async def terminate(self):
@@ -307,7 +310,74 @@ class XiuXianPlugin(Star):
             self.bounty_check_task.cancel()
         await self.db.close()
         logger.info("【修仙插件】已卸载。")
-        
+
+    async def _initialize_rifts(self):
+        """初始化秘境数据（首次启动时自动插入）"""
+        from .models_extended import Rift
+
+        # 检查是否已有秘境数据
+        existing_rifts = await self.db.ext.get_all_rifts()
+        if existing_rifts:
+            logger.info(f"【秘境系统】已有 {len(existing_rifts)} 个秘境，跳过初始化")
+            return
+
+        # 定义5个主题秘境
+        default_rifts = [
+            {
+                "rift_id": 1,
+                "rift_name": "剑冢遗迹",
+                "rift_level": 1,
+                "required_level": 0,
+                "rewards": '{"exp":[1000,3000],"gold":[500,1500]}',
+                "description": "上古剑修的试炼之地，遗留诸多法器"
+            },
+            {
+                "rift_id": 2,
+                "rift_name": "灵兽巢穴",
+                "rift_level": 1,
+                "required_level": 3,
+                "rewards": '{"exp":[1500,4000],"gold":[800,2000]}',
+                "description": "妖兽聚集地，可获得炼器材料"
+            },
+            {
+                "rift_id": 3,
+                "rift_name": "丹师洞府",
+                "rift_level": 2,
+                "required_level": 5,
+                "rewards": '{"exp":[3000,8000],"gold":[1500,4000]}',
+                "description": "陨落丹师的遗产，藏有稀有灵草"
+            },
+            {
+                "rift_id": 4,
+                "rift_name": "玄冰洞窟",
+                "rift_level": 2,
+                "required_level": 8,
+                "rewards": '{"exp":[4000,10000],"gold":[2000,5000]}',
+                "description": "冰系妖兽盘踞，冰系装备宝地"
+            },
+            {
+                "rift_id": 5,
+                "rift_name": "天火秘境",
+                "rift_level": 3,
+                "required_level": 12,
+                "rewards": '{"exp":[8000,20000],"gold":[5000,12000]}',
+                "description": "传说中的仙人洞府，顶级传承"
+            },
+        ]
+
+        # 插入数据库
+        for rift_data in default_rifts:
+            rift = Rift(
+                rift_id=rift_data["rift_id"],
+                rift_name=rift_data["rift_name"],
+                rift_level=rift_data["rift_level"],
+                required_level=rift_data["required_level"],
+                rewards=rift_data["rewards"]
+            )
+            await self.db.ext.create_rift(rift)
+
+        logger.info(f"【秘境系统】初始化完成，创建了 {len(default_rifts)} 个秘境")
+
     async def _schedule_boss_spawn(self):
         """Boss定时生成任务（支持持久化和指数退避）"""
         import time

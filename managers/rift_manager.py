@@ -19,29 +19,98 @@ class RiftManager:
     
     # 默认秘境探索时长（秒）
     DEFAULT_DURATION = 1800
-    
-    # 秘境物品掉落表（按秘境等级分组）
-    RIFT_DROP_TABLE = {
-        1: [  # 低级秘境
-            {"name": "灵草", "weight": 40, "min": 2, "max": 5},
-            {"name": "精铁", "weight": 30, "min": 1, "max": 3},
-            {"name": "灵石碎片", "weight": 30, "min": 3, "max": 8},
+
+    # ========== 秘境掉落系统重构：装备+功法+稀有材料 ==========
+
+    # 秘境材料掉落表（保底掉落，100%触发）
+    RIFT_MATERIAL_TABLE = {
+        1: [  # 低级秘境 - 基础材料
+            {"name": "玄铁", "weight": 40, "min": 1, "max": 3},
+            {"name": "灵兽骨", "weight": 30, "min": 1, "max": 2},
+            {"name": "精铁", "weight": 20, "min": 2, "max": 4},
+            {"name": "功法残页", "weight": 10, "min": 1, "max": 1},
         ],
-        2: [  # 中级秘境
-            {"name": "灵草", "weight": 30, "min": 3, "max": 7},
-            {"name": "玄铁", "weight": 25, "min": 2, "max": 4},
-            {"name": "灵兽毛皮", "weight": 20, "min": 1, "max": 3},
-            {"name": "功法残页", "weight": 15, "min": 1, "max": 1},
-            {"name": "秘境精华", "weight": 10, "min": 1, "max": 2},
-        ],
-        3: [  # 高级秘境
-            {"name": "玄铁", "weight": 25, "min": 3, "max": 6},
-            {"name": "星辰石", "weight": 20, "min": 2, "max": 4},
-            {"name": "灵兽内丹", "weight": 20, "min": 1, "max": 2},
-            {"name": "功法残页", "weight": 20, "min": 1, "max": 2},
+        2: [  # 中级秘境 - 进阶材料
+            {"name": "星辰石", "weight": 35, "min": 2, "max": 5},
+            {"name": "灵兽内丹", "weight": 30, "min": 1, "max": 2},
+            {"name": "玄冰晶", "weight": 20, "min": 1, "max": 3},
             {"name": "天材地宝", "weight": 15, "min": 1, "max": 1},
         ],
+        3: [  # 高级秘境 - 稀有材料
+            {"name": "紫金神铁", "weight": 25, "min": 1, "max": 3},
+            {"name": "龙鳞", "weight": 20, "min": 1, "max": 1},
+            {"name": "仙灵草", "weight": 30, "min": 2, "max": 4},
+            {"name": "传承玉简", "weight": 15, "min": 1, "max": 1},
+            {"name": "混沌石", "weight": 10, "min": 1, "max": 2},
+        ],
     }
+
+    # 秘境装备掉落表（爆率掉落）
+    RIFT_EQUIPMENT_TABLE = {
+        1: {  # 低级秘境
+            "drop_rate": 25,  # 25%爆率
+            "items": [
+                {"name": "精铁剑", "type": "武器", "weight": 30},
+                {"name": "青铜剑", "type": "武器", "weight": 25},
+                {"name": "布衣", "type": "防具", "weight": 25},
+                {"name": "护心镜", "type": "饰品", "weight": 15},
+                {"name": "灵石手镯", "type": "饰品", "weight": 5},
+            ]
+        },
+        2: {  # 中级秘境
+            "drop_rate": 30,  # 30%爆率
+            "items": [
+                {"name": "玄铁重剑", "type": "武器", "weight": 25},
+                {"name": "寒冰刃", "type": "武器", "weight": 20},
+                {"name": "炼心甲", "type": "防具", "weight": 25},
+                {"name": "云纹袍", "type": "防具", "weight": 15},
+                {"name": "灵玉佩", "type": "饰品", "weight": 15},
+            ]
+        },
+        3: {  # 高级秘境
+            "drop_rate": 40,  # 40%爆率
+            "items": [
+                {"name": "寒霜仙剑", "type": "武器", "quality": "极品", "weight": 15},
+                {"name": "烈焰刀", "type": "武器", "quality": "极品", "weight": 12},
+                {"name": "天蚕宝甲", "type": "防具", "quality": "极品", "weight": 15},
+                {"name": "龙鳞甲", "type": "防具", "quality": "极品", "weight": 10},
+                {"name": "混元戒", "type": "饰品", "quality": "极品", "weight": 8},
+            ]
+        },
+    }
+
+    # 秘境功法掉落表（低爆率）
+    RIFT_SKILL_TABLE = {
+        1: {  # 低级秘境
+            "drop_rate": 10,  # 10%爆率
+            "items": [
+                {"name": "基础剑诀", "type": "攻击功法", "weight": 40},
+                {"name": "凝神诀", "type": "辅助功法", "weight": 35},
+                {"name": "护体诀", "type": "防御功法", "weight": 25},
+            ]
+        },
+        2: {  # 中级秘境
+            "drop_rate": 15,  # 15%爆率
+            "items": [
+                {"name": "烈焰掌", "type": "攻击功法", "weight": 30},
+                {"name": "金刚诀", "type": "防御功法", "weight": 25},
+                {"name": "疾风步", "type": "身法功法", "weight": 25},
+                {"name": "御剑术", "type": "特殊功法", "weight": 20},
+            ]
+        },
+        3: {  # 高级秘境
+            "drop_rate": 20,  # 20%爆率
+            "items": [
+                {"name": "九天玄雷诀", "type": "顶级攻击功法", "weight": 20},
+                {"name": "太上忘情诀", "type": "顶级心法", "weight": 15},
+                {"name": "逍遥游", "type": "顶级身法", "weight": 25},
+                {"name": "万剑归宗", "type": "终极剑法", "weight": 10},
+            ]
+        },
+    }
+
+    # 双倍掉落触发概率
+    DOUBLE_DROP_CHANCE = 5  # 5%概率触发双倍掉落
     
     # 秘境稀有丹药掉落表（按秘境等级分组，低概率掉落通用增益丹）
     RIFT_PILL_DROP_TABLE = {
@@ -234,26 +303,62 @@ class RiftManager:
         item_msg = ""
         dropped_items = await self._roll_rift_drops(player, rift_level, event["item_chance"])
         if dropped_items:
-            item_lines = []
+            # 分类显示：装备、功法、材料、丹药
+            equipment_lines = []
+            skill_lines = []
+            material_lines = []
+            pill_lines = []
+
             for item_name, count in dropped_items:
-                # 检查是否为丹药，丹药存入丹药背包，其他存入储物戒
+                # 判断物品类型
                 is_pill = self._is_pill_item(item_name)
+                is_equipment = self._is_equipment_item(item_name)
+                is_skill = self._is_skill_item(item_name)
+
                 if is_pill:
                     # 存入丹药背包
                     inventory = player.get_pills_inventory()
                     inventory[item_name] = inventory.get(item_name, 0) + count
                     player.set_pills_inventory(inventory)
-                    item_lines.append(f"  · {item_name} x{count}（丹药背包）")
-                elif self.storage_ring_manager:
-                    success, _ = await self.storage_ring_manager.store_item(player, item_name, count, silent=True)
-                    if success:
-                        item_lines.append(f"  · {item_name} x{count}")
-                    else:
-                        item_lines.append(f"  · {item_name} x{count}（储物戒已满，丢失）")
+                    pill_lines.append(f"  🔥 {item_name} x{count}")
+                elif is_equipment:
+                    # 装备存入储物戒
+                    if self.storage_ring_manager:
+                        success, _ = await self.storage_ring_manager.store_item(player, item_name, count, silent=True)
+                        if success:
+                            equipment_lines.append(f"  ⚔️ {item_name} x{count}")
+                        else:
+                            equipment_lines.append(f"  ⚔️ {item_name} x{count}（储物戒已满，丢失）")
+                elif is_skill:
+                    # 功法存入储物戒
+                    if self.storage_ring_manager:
+                        success, _ = await self.storage_ring_manager.store_item(player, item_name, count, silent=True)
+                        if success:
+                            skill_lines.append(f"  📜 {item_name} x{count}")
+                        else:
+                            skill_lines.append(f"  📜 {item_name} x{count}（储物戒已满，丢失）")
                 else:
-                    item_lines.append(f"  · {item_name} x{count}（无法存储）")
-            if item_lines:
-                item_msg = "\n\n📦 获得物品：\n" + "\n".join(item_lines)
+                    # 材料存入储物戒
+                    if self.storage_ring_manager:
+                        success, _ = await self.storage_ring_manager.store_item(player, item_name, count, silent=True)
+                        if success:
+                            material_lines.append(f"  📦 {item_name} x{count}")
+                        else:
+                            material_lines.append(f"  📦 {item_name} x{count}（储物戒已满，丢失）")
+
+            # 组装掉落消息
+            all_lines = []
+            if equipment_lines:
+                all_lines.extend(equipment_lines)
+            if skill_lines:
+                all_lines.extend(skill_lines)
+            if material_lines:
+                all_lines.extend(material_lines)
+            if pill_lines:
+                all_lines.extend(pill_lines)
+
+            if all_lines:
+                item_msg = "\n\n✨ 获得物品：\n" + "\n".join(all_lines)
         
         # 7. 应用奖励
         player.experience += exp_reward
@@ -313,6 +418,24 @@ class RiftManager:
         if self.config_manager and hasattr(self.config_manager, 'is_pill'):
             return self.config_manager.is_pill(item_name)
         return False
+
+    def _is_equipment_item(self, item_name: str) -> bool:
+        """检查物品是否为装备（武器/防具/饰品）"""
+        # 遍历所有等级的装备表
+        for level_config in self.RIFT_EQUIPMENT_TABLE.values():
+            for item in level_config["items"]:
+                if item["name"] == item_name:
+                    return True
+        return False
+
+    def _is_skill_item(self, item_name: str) -> bool:
+        """检查物品是否为功法"""
+        # 遍历所有等级的功法表
+        for level_config in self.RIFT_SKILL_TABLE.values():
+            for item in level_config["items"]:
+                if item["name"] == item_name:
+                    return True
+        return False
     
     def _get_rift_level_by_player(self, player: Player) -> int:
         """根据玩家境界确定秘境等级"""
@@ -326,53 +449,83 @@ class RiftManager:
     
     async def _roll_rift_drops(self, player: Player, rift_level: int, item_chance: int) -> List[Tuple[str, int]]:
         """
-        根据秘境等级随机掉落物品
-        
+        根据秘境等级随机掉落物品（新系统：材料+装备+功法）
+
         Args:
             player: 玩家对象
             rift_level: 秘境等级 (1-3)
-            item_chance: 掉落概率
-            
+            item_chance: 基础掉落概率（事件加成）
+
         Returns:
             掉落物品列表 [(物品名, 数量), ...]
         """
         dropped_items = []
-        
-        # 检查是否触发物品掉落
-        if random.randint(1, 100) > item_chance:
-            return dropped_items
-        
-        # 获取对应等级的掉落表
-        drop_table = self.RIFT_DROP_TABLE.get(rift_level, self.RIFT_DROP_TABLE[1])
-        
-        # 加权随机选择物品（秘境保证至少掉落1件）
-        total_weight = sum(item["weight"] for item in drop_table)
-        roll = random.randint(1, total_weight)
-        
-        current_weight = 0
-        for item in drop_table:
-            current_weight += item["weight"]
-            if roll <= current_weight:
-                count = random.randint(item["min"], item["max"])
-                dropped_items.append((item["name"], count))
-                break
-        
-        # 高级秘境有50%概率额外掉落一件
-        if rift_level >= 2 and random.randint(1, 100) <= 50:
+
+        # 检查双倍掉落
+        is_double_drop = random.randint(1, 100) <= self.DOUBLE_DROP_CHANCE
+        double_msg = "【双倍掉落】" if is_double_drop else ""
+
+        # ===== 1. 材料掉落（保底，100%触发）=====
+        material_table = self.RIFT_MATERIAL_TABLE.get(rift_level, self.RIFT_MATERIAL_TABLE[1])
+
+        # 加权随机选择1-2个材料
+        num_materials = 2 if random.randint(1, 100) <= 50 else 1
+        for _ in range(num_materials):
+            total_weight = sum(item["weight"] for item in material_table)
             roll = random.randint(1, total_weight)
+
             current_weight = 0
-            for item in drop_table:
+            for item in material_table:
                 current_weight += item["weight"]
                 if roll <= current_weight:
                     count = random.randint(item["min"], item["max"])
+                    if is_double_drop:
+                        count *= 2
                     dropped_items.append((item["name"], count))
                     break
-        
-        # 稀有丹药掉落检测
+
+        # ===== 2. 装备掉落（爆率触发）=====
+        equipment_config = self.RIFT_EQUIPMENT_TABLE.get(rift_level, self.RIFT_EQUIPMENT_TABLE[1])
+        equipment_drop_rate = equipment_config["drop_rate"]
+
+        if random.randint(1, 100) <= equipment_drop_rate:
+            equipment_items = equipment_config["items"]
+            total_weight = sum(item["weight"] for item in equipment_items)
+            roll = random.randint(1, total_weight)
+
+            current_weight = 0
+            for item in equipment_items:
+                current_weight += item["weight"]
+                if roll <= current_weight:
+                    # 装备数量固定为1
+                    dropped_items.append((item["name"], 1))
+                    if is_double_drop:
+                        # 双倍掉落时再掉一件
+                        dropped_items.append((item["name"], 1))
+                    break
+
+        # ===== 3. 功法掉落（低爆率）=====
+        skill_config = self.RIFT_SKILL_TABLE.get(rift_level, self.RIFT_SKILL_TABLE[1])
+        skill_drop_rate = skill_config["drop_rate"]
+
+        if random.randint(1, 100) <= skill_drop_rate:
+            skill_items = skill_config["items"]
+            total_weight = sum(item["weight"] for item in skill_items)
+            roll = random.randint(1, total_weight)
+
+            current_weight = 0
+            for item in skill_items:
+                current_weight += item["weight"]
+                if roll <= current_weight:
+                    # 功法数量固定为1
+                    dropped_items.append((item["name"], 1))
+                    break
+
+        # ===== 4. 稀有丹药掉落（额外奖励，保留原逻辑）=====
         pill_drops = self._roll_pill_drops(rift_level)
         if pill_drops:
             dropped_items.extend(pill_drops)
-        
+
         return dropped_items
     
     def _roll_pill_drops(self, rift_level: int) -> List[Tuple[str, int]]:
