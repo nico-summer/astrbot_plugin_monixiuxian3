@@ -5,6 +5,7 @@
 
 import random
 import time
+from datetime import datetime
 from typing import Tuple, List, Optional, Dict, TYPE_CHECKING
 from ..data.data_manager import DataBase
 from ..models_extended import Rift, UserStatus
@@ -251,7 +252,10 @@ class RiftManager:
 
     # 双倍掉落触发概率
     DOUBLE_DROP_CHANCE = 5  # 5%概率触发双倍掉落
-    
+
+    # 每日秘境探索次数限制
+    DAILY_RIFT_LIMIT = 5  # 每个秘境每天最多探索5次
+
     # 秘境稀有丹药掉落表（按秘境等级分组，低概率掉落通用增益丹）
     RIFT_PILL_DROP_TABLE = {
         1: [  # 低级秘境 - 3%概率掉落
@@ -297,37 +301,61 @@ class RiftManager:
             return level_names[level_index]
         return f"境界{level_index}"
     
-    async def list_rifts(self) -> Tuple[bool, str]:
+    async def list_rifts(self, player: Optional[Player] = None) -> Tuple[bool, str]:
         """
         列出所有秘境
-        
+
+        Args:
+            player: 玩家对象（可选，用于显示剩余次数）
+
         Returns:
             (成功标志, 消息)
         """
         rifts = await self.db.ext.get_all_rifts()
-        
+
         if not rifts:
             return False, "❌ 当前没有开放的秘境！"
-        
+
+        # 获取玩家今日探索次数
+        daily_count = {}
+        if player:
+            today = datetime.now().strftime("%Y-%m-%d")
+            if player.rift_count_reset_date != today:
+                # 日期不同，重置计数
+                daily_count = {}
+            else:
+                daily_count = player.get_rift_daily_count()
+
         msg = "🌀 秘境列表\n"
         msg += "━━━━━━━━━━━━━━━\n"
-        
+
         for rift in rifts:
             rewards_dict = rift.get_rewards()
             exp_range = rewards_dict.get("exp", [0, 0])
             gold_range = rewards_dict.get("gold", [0, 0])
             level_name = self._get_level_name(rift.required_level)
-            
+
             msg += f"【{rift.rift_name}】(ID:{rift.rift_id})\n"
             if rift.required_level == 0:
                 msg += f"  等级要求：无限制\n"
             else:
                 msg += f"  等级要求：{level_name} 及以上\n"
             msg += f"  修为奖励：{exp_range[0]:,}-{exp_range[1]:,}\n"
-            msg += f"  灵石奖励：{gold_range[0]:,}-{gold_range[1]:,}\n\n"
-        
+            msg += f"  灵石奖励：{gold_range[0]:,}-{gold_range[1]:,}\n"
+
+            # 显示剩余次数
+            if player:
+                used_count = daily_count.get(str(rift.rift_id), 0)
+                remaining = self.DAILY_RIFT_LIMIT - used_count
+                if remaining > 0:
+                    msg += f"  今日剩余：{remaining}/{self.DAILY_RIFT_LIMIT} 次\n\n"
+                else:
+                    msg += f"  今日剩余：已达上限 ❌\n\n"
+            else:
+                msg += "\n"
+
         msg += "💡 使用 /探索秘境 <ID> 进入（如：/探索秘境 1）"
-        
+
         return True, msg
     
     async def enter_rift(
@@ -337,11 +365,11 @@ class RiftManager:
     ) -> Tuple[bool, str]:
         """
         进入秘境
-        
+
         Args:
             user_id: 用户ID
             rift_id: 秘境ID
-            
+
         Returns:
             (成功标志, 消息)
         """
@@ -349,21 +377,38 @@ class RiftManager:
         player = await self.db.get_player_by_id(user_id)
         if not player:
             return False, "❌ 你还未踏入修仙之路！"
-        
+
         # 2. 检查用户状态
         user_cd = await self.db.ext.get_user_cd(user_id)
         if not user_cd:
             await self.db.ext.create_user_cd(user_id)
             user_cd = await self.db.ext.get_user_cd(user_id)
-        
+
         if user_cd.type != UserStatus.IDLE:
             return False, f"❌ 你当前正{UserStatus.get_name(user_cd.type)}，无法探索秘境！"
-        
+
         # 3. 检查秘境
         rift = await self.db.ext.get_rift_by_id(rift_id)
         if not rift:
             return False, "❌ 秘境不存在！使用 /秘境列表 查看可用秘境"
-        
+
+        # 3.5. 检查每日次数限制
+        today = datetime.now().strftime("%Y-%m-%d")
+        daily_count = player.get_rift_daily_count()
+
+        # 如果日期不同，重置计数
+        if player.rift_count_reset_date != today:
+            daily_count = {}
+            player.rift_count_reset_date = today
+            player.set_rift_daily_count(daily_count)
+            await self.db.update_player(player)
+
+        # 检查该秘境今日探索次数
+        rift_id_str = str(rift_id)
+        used_count = daily_count.get(rift_id_str, 0)
+        if used_count >= self.DAILY_RIFT_LIMIT:
+            return False, f"❌【{rift.rift_name}】今日探索次数已达上限（{self.DAILY_RIFT_LIMIT}次）！\n💡 明日 00:00 重置次数。"
+
         # 4. 检查境界要求（上下限）
         level_diff = player.level_index - rift.required_level
 
@@ -387,7 +432,8 @@ class RiftManager:
         extra_data = {"rift_id": rift_id, "rift_level": rift.rift_level, "level_diff": level_diff}
         await self.db.ext.set_user_busy(user_id, UserStatus.EXPLORING, scheduled_time, extra_data)
 
-        return True, f"✨ 你进入了『{rift.rift_name}』！探索需要 {self.explore_duration//60} 分钟。\n使用 /完成探索 领取奖励{warning_msg}"
+        remaining = self.DAILY_RIFT_LIMIT - used_count - 1
+        return True, f"✨ 你进入了『{rift.rift_name}』！探索需要 {self.explore_duration//60} 分钟。\n使用 /完成探索 领取奖励\n📋 今日剩余次数：{remaining}/{self.DAILY_RIFT_LIMIT}{warning_msg}"
     
     async def finish_exploration(
         self,
@@ -513,15 +559,33 @@ class RiftManager:
 
             if all_lines:
                 item_msg = "\n\n✨ 获得物品：\n" + "\n".join(all_lines)
-        
-        # 7. 应用奖励
+
+        # 7. 增加每日秘境探索次数计数
+        today = datetime.now().strftime("%Y-%m-%d")
+        daily_count = player.get_rift_daily_count()
+
+        # 如果日期不同，重置计数（兼容处理）
+        if player.rift_count_reset_date != today:
+            daily_count = {}
+            player.rift_count_reset_date = today
+
+        # 增加该秘境的探索次数
+        rift_id_str = str(rift_id)
+        daily_count[rift_id_str] = daily_count.get(rift_id_str, 0) + 1
+        player.set_rift_daily_count(daily_count)
+
+        # 8. 应用奖励
         player.experience += exp_reward
         player.gold += gold_reward
         await self.db.update_player(player)
-        
-        # 8. 清除CD
+
+        # 9. 清除CD
         await self.db.ext.set_user_free(user_id)
-        
+
+        # 计算剩余次数
+        remaining = self.DAILY_RIFT_LIMIT - daily_count[rift_id_str]
+        remaining_msg = f"\n📋 今日剩余次数：{remaining}/{self.DAILY_RIFT_LIMIT}" if remaining > 0 else "\n⚠️ 今日探索次数已用尽"
+
         msg = f"""
 🌀 探索完成 - {rift_name}
 ━━━━━━━━━━━━━━━
@@ -529,7 +593,7 @@ class RiftManager:
 {event["desc"]}
 
 获得修为：+{exp_reward:,}
-获得灵石：+{gold_reward:,}{item_msg}
+获得灵石：+{gold_reward:,}{item_msg}{remaining_msg}
         """.strip()
         
         reward_data = {

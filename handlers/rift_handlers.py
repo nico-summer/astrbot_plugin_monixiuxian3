@@ -10,7 +10,9 @@ class RiftHandlers:
 
     async def handle_rift_list(self, event: AstrMessageEvent):
         """秘境列表"""
-        success, msg = await self.rift_mgr.list_rifts()
+        user_id = event.get_sender_id()
+        player = await self.db.get_player_by_id(user_id)
+        success, msg = await self.rift_mgr.list_rifts(player)
         yield event.plain_result(msg)
 
     async def handle_rift_explore(self, event: AstrMessageEvent, rift_id: int):

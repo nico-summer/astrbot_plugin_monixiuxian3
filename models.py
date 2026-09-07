@@ -125,6 +125,10 @@ class Player:
     daily_pill_usage: str = "{}"  # 每日丹药使用次数（JSON字符串，格式：{pill_id: count}）
     last_daily_reset: str = ""  # 上次每日重置日期（格式：YYYY-MM-DD）
 
+    # 秘境每日次数限制
+    rift_daily_count: str = "{}"  # 每日秘境探索次数（JSON字符串，格式：{rift_id: count}）
+    rift_count_reset_date: str = ""  # 秘境次数重置日期（格式：YYYY-MM-DD）
+
     def get_level(self, config_manager: "ConfigManager") -> str:
         """获取境界名称"""
         level_data = config_manager.get_level_data(self.cultivation_type)
@@ -193,6 +197,17 @@ class Player:
     def set_storage_ring_items(self, items: dict):
         """设置储物戒物品"""
         self.storage_ring_items = json.dumps(items, ensure_ascii=False)
+
+    def get_rift_daily_count(self) -> dict:
+        """获取秘境每日探索次数"""
+        try:
+            return json.loads(self.rift_daily_count)
+        except json.JSONDecodeError:
+            return {}
+
+    def set_rift_daily_count(self, count_dict: dict):
+        """设置秘境每日探索次数"""
+        self.rift_daily_count = json.dumps(count_dict, ensure_ascii=False)
 
     def get_total_attributes(self, equipped_items: List[Item], pill_multipliers: Optional[dict] = None) -> dict:
         """计算包含装备加成和丹药效果的总属性

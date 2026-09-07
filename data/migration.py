@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 24  # v24: 恢复次数记录
+LATEST_DB_VERSION = 25  # v25: 秘境每日次数限制
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -30,6 +30,14 @@ async def _migrate_to_v24(conn: aiosqlite.Connection, config_manager: ConfigMana
             use_count INTEGER NOT NULL DEFAULT 0
         )
     """)
+
+@migration(25)
+async def _migrate_to_v25(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v25 - 添加秘境每日次数限制"""
+    logger.info("开始迁移到v25：添加秘境每日次数限制")
+    await conn.execute("ALTER TABLE players ADD COLUMN rift_daily_count TEXT NOT NULL DEFAULT '{}'")
+    await conn.execute("ALTER TABLE players ADD COLUMN rift_count_reset_date TEXT NOT NULL DEFAULT ''")
+    logger.info("v25迁移完成：秘境每日次数限制")
 
 class MigrationManager:
     """数据库迁移管理器"""
@@ -368,9 +376,12 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
             pills_inventory TEXT NOT NULL DEFAULT '{}',
             storage_ring TEXT NOT NULL DEFAULT '基础储物戒',
             storage_ring_items TEXT NOT NULL DEFAULT '{}',
-            
+
             daily_pill_usage TEXT NOT NULL DEFAULT '{}',
-            last_daily_reset TEXT NOT NULL DEFAULT ''
+            last_daily_reset TEXT NOT NULL DEFAULT '',
+
+            rift_daily_count TEXT NOT NULL DEFAULT '{}',
+            rift_count_reset_date TEXT NOT NULL DEFAULT ''
         )
     """)
 
