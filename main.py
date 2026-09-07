@@ -321,8 +321,9 @@ class XiuXianPlugin(Star):
             logger.info(f"【秘境系统】已有 {len(existing_rifts)} 个秘境，跳过初始化")
             return
 
-        # 定义5个主题秘境
+        # 定义主题秘境（12个秘境，覆盖全境界）
         default_rifts = [
+            # === Lv.1 炼气期秘境（2个）===
             {
                 "rift_id": 1,
                 "rift_name": "剑冢遗迹",
@@ -339,11 +340,12 @@ class XiuXianPlugin(Star):
                 "rewards": '{"exp":[1500,4000],"gold":[800,2000]}',
                 "description": "妖兽聚集地，可获得炼器材料"
             },
+            # === Lv.2 筑基期秘境（2个）===
             {
                 "rift_id": 3,
                 "rift_name": "丹师洞府",
                 "rift_level": 2,
-                "required_level": 5,
+                "required_level": 10,
                 "rewards": '{"exp":[3000,8000],"gold":[1500,4000]}',
                 "description": "陨落丹师的遗产，藏有稀有灵草"
             },
@@ -351,17 +353,86 @@ class XiuXianPlugin(Star):
                 "rift_id": 4,
                 "rift_name": "玄冰洞窟",
                 "rift_level": 2,
-                "required_level": 8,
+                "required_level": 11,
                 "rewards": '{"exp":[4000,10000],"gold":[2000,5000]}',
                 "description": "冰系妖兽盘踞，冰系装备宝地"
             },
+            # === Lv.3 金丹期秘境（2个）===
             {
                 "rift_id": 5,
                 "rift_name": "天火秘境",
                 "rift_level": 3,
-                "required_level": 12,
+                "required_level": 13,
                 "rewards": '{"exp":[8000,20000],"gold":[5000,12000]}',
                 "description": "传说中的仙人洞府，顶级传承"
+            },
+            {
+                "rift_id": 6,
+                "rift_name": "雷霆试炼地",
+                "rift_level": 3,
+                "required_level": 15,
+                "rewards": '{"exp":[10000,25000],"gold":[6000,15000]}',
+                "description": "雷属性修士的试炼圣地"
+            },
+            # === Lv.4 元婴期秘境（2个）===
+            {
+                "rift_id": 7,
+                "rift_name": "幽冥血海",
+                "rift_level": 4,
+                "required_level": 16,
+                "rewards": '{"exp":[30000,80000],"gold":[15000,40000]}',
+                "description": "血系功法与魔道装备的源泉"
+            },
+            {
+                "rift_id": 8,
+                "rift_name": "星辰殿堂",
+                "rift_level": 4,
+                "required_level": 18,
+                "rewards": '{"exp":[50000,120000],"gold":[25000,60000]}',
+                "description": "上古星辰大能的修炼圣地"
+            },
+            # === Lv.5 化神-炼虚期秘境（2个）===
+            {
+                "rift_id": 9,
+                "rift_name": "虚空裂缝",
+                "rift_level": 5,
+                "required_level": 19,
+                "rewards": '{"exp":[100000,250000],"gold":[50000,120000]}',
+                "description": "空间法则流转之地，虚空装备现世"
+            },
+            {
+                "rift_id": 10,
+                "rift_name": "仙陨战场",
+                "rift_level": 5,
+                "required_level": 22,
+                "rewards": '{"exp":[200000,500000],"gold":[100000,250000]}',
+                "description": "上古仙魔大战遗迹，仙器碎片遍地"
+            },
+            # === Lv.6 合体-大乘期秘境（2个）===
+            {
+                "rift_id": 11,
+                "rift_name": "混沌神殿",
+                "rift_level": 6,
+                "required_level": 25,
+                "rewards": '{"exp":[500000,1200000],"gold":[250000,600000]}',
+                "description": "混沌初开之地，神级功法传承"
+            },
+            {
+                "rift_id": 12,
+                "rift_name": "诸天万界塔",
+                "rift_level": 6,
+                "required_level": 28,
+                "rewards": '{"exp":[1000000,2500000],"gold":[500000,1200000]}',
+                "description": "连接诸天万界的至尊试炼塔"
+            },
+            # === Lv.7 渡劫期+秘境（1个）===
+            {
+                "rift_id": 13,
+                "rift_name": "仙界试炼地",
+                "rift_level": 7,
+                "required_level": 30,
+                "rewards": '{"exp":[3000000,8000000],"gold":[1500000,4000000]}',
+                "description": "仙界入口的最终考验，仙品装备与传承"
             },
         ]
 

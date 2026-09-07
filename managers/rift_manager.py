@@ -43,6 +43,34 @@ class RiftManager:
             {"name": "传承玉简", "weight": 15, "min": 1, "max": 1},
             {"name": "混沌石", "weight": 10, "min": 1, "max": 2},
         ],
+        4: [  # 元婴期秘境 - 血魔材料
+            {"name": "血魂石", "weight": 30, "min": 2, "max": 5},
+            {"name": "星核碎片", "weight": 25, "min": 1, "max": 3},
+            {"name": "魔晶", "weight": 20, "min": 1, "max": 2},
+            {"name": "元婴精华", "weight": 15, "min": 1, "max": 1},
+            {"name": "不朽骨", "weight": 10, "min": 1, "max": 1},
+        ],
+        5: [  # 化神-炼虚期秘境 - 虚空材料
+            {"name": "虚空结晶", "weight": 25, "min": 2, "max": 4},
+            {"name": "仙器碎片", "weight": 25, "min": 1, "max": 2},
+            {"name": "空间石", "weight": 20, "min": 1, "max": 3},
+            {"name": "法则碎片", "weight": 20, "min": 1, "max": 2},
+            {"name": "时光沙", "weight": 10, "min": 1, "max": 1},
+        ],
+        6: [  # 合体-大乘期秘境 - 混沌材料
+            {"name": "混沌精华", "weight": 30, "min": 2, "max": 5},
+            {"name": "神铁", "weight": 25, "min": 1, "max": 3},
+            {"name": "万界石", "weight": 20, "min": 1, "max": 2},
+            {"name": "道韵结晶", "weight": 15, "min": 1, "max": 2},
+            {"name": "大道碎片", "weight": 10, "min": 1, "max": 1},
+        ],
+        7: [  # 渡劫期+秘境 - 仙界材料
+            {"name": "仙晶", "weight": 30, "min": 3, "max": 8},
+            {"name": "天劫雷晶", "weight": 25, "min": 2, "max": 5},
+            {"name": "仙灵根", "weight": 20, "min": 1, "max": 3},
+            {"name": "涅槃石", "weight": 15, "min": 1, "max": 2},
+            {"name": "仙道本源", "weight": 10, "min": 1, "max": 1},
+        ],
     }
 
     # 秘境装备掉落表（爆率掉落）
@@ -77,6 +105,50 @@ class RiftManager:
                 {"name": "混元戒", "type": "饰品", "quality": "极品", "weight": 8},
             ]
         },
+        4: {  # 元婴期秘境
+            "drop_rate": 45,  # 45%爆率
+            "items": [
+                {"name": "血魔剑", "type": "武器", "quality": "传说", "weight": 20},
+                {"name": "星辰法杖", "type": "武器", "quality": "传说", "weight": 18},
+                {"name": "血煞战甲", "type": "防具", "quality": "传说", "weight": 20},
+                {"name": "星纹道袍", "type": "防具", "quality": "传说", "weight": 18},
+                {"name": "元婴护符", "type": "饰品", "quality": "传说", "weight": 14},
+                {"name": "不朽骨链", "type": "饰品", "quality": "传说", "weight": 10},
+            ]
+        },
+        5: {  # 化神-炼虚期秘境
+            "drop_rate": 50,  # 50%爆率
+            "items": [
+                {"name": "虚空神剑", "type": "武器", "quality": "神器", "weight": 18},
+                {"name": "仙陨战戟", "type": "武器", "quality": "神器", "weight": 16},
+                {"name": "虚空战甲", "type": "防具", "quality": "神器", "weight": 18},
+                {"name": "仙陨法袍", "type": "防具", "quality": "神器", "weight": 16},
+                {"name": "空间戒指", "type": "饰品", "quality": "神器", "weight": 16},
+                {"name": "时光之沙", "type": "饰品", "quality": "神器", "weight": 16},
+            ]
+        },
+        6: {  # 合体-大乘期秘境
+            "drop_rate": 55,  # 55%爆率
+            "items": [
+                {"name": "混沌神剑", "type": "武器", "quality": "至尊", "weight": 16},
+                {"name": "万界神兵", "type": "武器", "quality": "至尊", "weight": 15},
+                {"name": "混沌战甲", "type": "防具", "quality": "至尊", "weight": 16},
+                {"name": "万界道袍", "type": "防具", "quality": "至尊", "weight": 15},
+                {"name": "混沌神环", "type": "饰品", "quality": "至尊", "weight": 20},
+                {"name": "大道之石", "type": "饰品", "quality": "至尊", "weight": 18},
+            ]
+        },
+        7: {  # 渡劫期+秘境
+            "drop_rate": 60,  # 60%爆率
+            "items": [
+                {"name": "仙剑·诛仙", "type": "武器", "quality": "仙品", "weight": 15},
+                {"name": "仙器·开天斧", "type": "武器", "quality": "仙品", "weight": 12},
+                {"name": "仙甲·不灭金身", "type": "防具", "quality": "仙品", "weight": 18},
+                {"name": "仙袍·万劫不磨", "type": "防具", "quality": "仙品", "weight": 15},
+                {"name": "仙环·涅槃重生", "type": "饰品", "quality": "仙品", "weight": 20},
+                {"name": "仙玉·大道本源", "type": "饰品", "quality": "仙品", "weight": 20},
+            ]
+        },
     }
 
     # 秘境功法掉落表（低爆率）
@@ -105,6 +177,46 @@ class RiftManager:
                 {"name": "太上忘情诀", "type": "顶级心法", "weight": 15},
                 {"name": "逍遥游", "type": "顶级身法", "weight": 25},
                 {"name": "万剑归宗", "type": "终极剑法", "weight": 10},
+            ]
+        },
+        4: {  # 元婴期秘境
+            "drop_rate": 25,  # 25%爆率
+            "items": [
+                {"name": "血海魔功", "type": "魔道功法", "weight": 25},
+                {"name": "星辰炼体诀", "type": "体修功法", "weight": 25},
+                {"name": "元婴变", "type": "神通功法", "weight": 20},
+                {"name": "夺命血爪", "type": "杀招", "weight": 15},
+                {"name": "星辰坠", "type": "终极术法", "weight": 15},
+            ]
+        },
+        5: {  # 化神-炼虚期秘境
+            "drop_rate": 30,  # 30%爆率
+            "items": [
+                {"name": "虚空大挪移", "type": "空间神通", "weight": 25},
+                {"name": "时光倒流术", "type": "时间秘法", "weight": 20},
+                {"name": "仙陨九式", "type": "绝世剑法", "weight": 25},
+                {"name": "法则感悟", "type": "悟道心法", "weight": 20},
+                {"name": "空间撕裂", "type": "终极神通", "weight": 10},
+            ]
+        },
+        6: {  # 合体-大乘期秘境
+            "drop_rate": 35,  # 35%爆率
+            "items": [
+                {"name": "混沌开天诀", "type": "至尊功法", "weight": 20},
+                {"name": "万界归一", "type": "终极心法", "weight": 18},
+                {"name": "大道无形", "type": "道祖传承", "weight": 22},
+                {"name": "混沌神雷", "type": "至尊神通", "weight": 20},
+                {"name": "万劫不灭体", "type": "不死之身", "weight": 20},
+            ]
+        },
+        7: {  # 渡劫期+秘境
+            "drop_rate": 40,  # 40%爆率
+            "items": [
+                {"name": "仙诀·九天玄功", "type": "仙界功法", "weight": 25},
+                {"name": "仙术·天劫雷罚", "type": "仙界神通", "weight": 22},
+                {"name": "仙道·涅槃重生", "type": "不死秘法", "weight": 20},
+                {"name": "仙法·破碎虚空", "type": "飞升秘技", "weight": 18},
+                {"name": "大道本源经", "type": "终极传承", "weight": 15},
             ]
         },
     }
@@ -224,17 +336,30 @@ class RiftManager:
         if not rift:
             return False, "❌ 秘境不存在！使用 /秘境列表 查看可用秘境"
         
-        # 4. 检查境界要求
-        if player.level_index < rift.required_level:
+        # 4. 检查境界要求（上下限）
+        level_diff = player.level_index - rift.required_level
+
+        # 等级过低
+        if level_diff < 0:
             level_name = self._get_level_name(rift.required_level)
             return False, f"❌ 探索【{rift.rift_name}】需要达到【{level_name}】！"
-        
-        # 5. 设置探索状态，存储秘境ID
+
+        # 等级过高（硬性限制）
+        if level_diff > 20:
+            return False, f"❌【{rift.rift_name}】等级过低，已无法进入。\n💡 请使用 /秘境列表 查看适合你的秘境。"
+
+        # 等级偏高（警告+掉落惩罚）
+        warning_msg = ""
+        if level_diff > 10:
+            penalty_percent = (20 - level_diff) * 5  # 11级差=45%掉落率
+            warning_msg = f"\n⚠️ 警告：秘境等级过低，装备/功法掉落率降低{100-penalty_percent}%！建议选择更高级秘境。"
+
+        # 5. 设置探索状态，存储秘境ID和等级差（用于掉落计算）
         scheduled_time = int(time.time()) + self.explore_duration
-        extra_data = {"rift_id": rift_id, "rift_level": rift.rift_level}
+        extra_data = {"rift_id": rift_id, "rift_level": rift.rift_level, "level_diff": level_diff}
         await self.db.ext.set_user_busy(user_id, UserStatus.EXPLORING, scheduled_time, extra_data)
-        
-        return True, f"✨ 你进入了『{rift.rift_name}』！探索需要 {self.explore_duration//60} 分钟。\n使用 /完成探索 领取奖励"
+
+        return True, f"✨ 你进入了『{rift.rift_name}』！探索需要 {self.explore_duration//60} 分钟。\n使用 /完成探索 领取奖励{warning_msg}"
     
     async def finish_exploration(
         self,
@@ -270,6 +395,7 @@ class RiftManager:
         extra_data = user_cd.get_extra_data() if hasattr(user_cd, 'get_extra_data') else {}
         rift_id = extra_data.get("rift_id", 0)
         rift_level = extra_data.get("rift_level", 1)
+        level_diff = extra_data.get("level_diff", 0)  # 获取等级差
         
         # 获取秘境配置
         rift = await self.db.ext.get_rift_by_id(rift_id) if rift_id else None
@@ -298,10 +424,10 @@ class RiftManager:
         ]
         event = random.choice(events)
         
-        # 6. 物品掉落（根据秘境等级）
+        # 6. 物品掉落（根据秘境等级和等级差）
         dropped_items = []
         item_msg = ""
-        dropped_items = await self._roll_rift_drops(player, rift_level, event["item_chance"])
+        dropped_items = await self._roll_rift_drops(player, rift_level, event["item_chance"], level_diff)
         if dropped_items:
             # 分类显示：装备、功法、材料、丹药
             equipment_lines = []
@@ -447,7 +573,7 @@ class RiftManager:
         else:
             return 3  # 高级秘境
     
-    async def _roll_rift_drops(self, player: Player, rift_level: int, item_chance: int) -> List[Tuple[str, int]]:
+    async def _roll_rift_drops(self, player: Player, rift_level: int, item_chance: int, level_diff: int = 0) -> List[Tuple[str, int]]:
         """
         根据秘境等级随机掉落物品（新系统：材料+装备+功法）
 
@@ -455,6 +581,7 @@ class RiftManager:
             player: 玩家对象
             rift_level: 秘境等级 (1-3)
             item_chance: 基础掉落概率（事件加成）
+            level_diff: 等级差（玩家等级 - 秘境要求等级）
 
         Returns:
             掉落物品列表 [(物品名, 数量), ...]
@@ -463,7 +590,12 @@ class RiftManager:
 
         # 检查双倍掉落
         is_double_drop = random.randint(1, 100) <= self.DOUBLE_DROP_CHANCE
-        double_msg = "【双倍掉落】" if is_double_drop else ""
+
+        # 计算等级差掉落惩罚（超过10级开始惩罚）
+        drop_penalty = 1.0
+        if level_diff > 10:
+            # 11级差=90%掉落率，20级差=10%掉落率，线性递减
+            drop_penalty = max(0.1, (20 - level_diff) / 10)
 
         # ===== 1. 材料掉落（保底，100%触发）=====
         material_table = self.RIFT_MATERIAL_TABLE.get(rift_level, self.RIFT_MATERIAL_TABLE[1])
@@ -484,9 +616,9 @@ class RiftManager:
                     dropped_items.append((item["name"], count))
                     break
 
-        # ===== 2. 装备掉落（爆率触发）=====
+        # ===== 2. 装备掉落（爆率触发，受等级差惩罚）=====
         equipment_config = self.RIFT_EQUIPMENT_TABLE.get(rift_level, self.RIFT_EQUIPMENT_TABLE[1])
-        equipment_drop_rate = equipment_config["drop_rate"]
+        equipment_drop_rate = equipment_config["drop_rate"] * drop_penalty  # 应用惩罚
 
         if random.randint(1, 100) <= equipment_drop_rate:
             equipment_items = equipment_config["items"]
@@ -504,9 +636,9 @@ class RiftManager:
                         dropped_items.append((item["name"], 1))
                     break
 
-        # ===== 3. 功法掉落（低爆率）=====
+        # ===== 3. 功法掉落（低爆率，受等级差惩罚）=====
         skill_config = self.RIFT_SKILL_TABLE.get(rift_level, self.RIFT_SKILL_TABLE[1])
-        skill_drop_rate = skill_config["drop_rate"]
+        skill_drop_rate = skill_config["drop_rate"] * drop_penalty  # 应用惩罚
 
         if random.randint(1, 100) <= skill_drop_rate:
             skill_items = skill_config["items"]
