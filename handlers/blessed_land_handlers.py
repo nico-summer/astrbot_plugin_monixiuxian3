@@ -53,3 +53,9 @@ class BlessedLandHandlers:
         """收取洞天产出"""
         success, msg = await self.mgr.collect_income(player)
         yield event.plain_result(msg)
+
+    @player_required
+    async def handle_sell(self, player: Player, event: AstrMessageEvent):
+        """转让/卖出洞天"""
+        success, msg = await self.mgr.sell_blessed_land(player)
+        yield event.plain_result(msg)

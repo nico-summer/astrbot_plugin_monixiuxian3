@@ -166,6 +166,70 @@ class BlessedLandManager:
             f"当前灵石：{player.gold:,}"
         )
     
+    async def sell_blessed_land(self, player: Player) -> Tuple[bool, str]:
+        """
+        卖出/转让洞天
+        回收价格 = 初始购买价 × 50% + 已升级花费 × 70%
+        """
+        land = await self.get_user_blessed_land(player.user_id)
+        if not land:
+            return False, "❌ 你还没有洞天，无法卖出！"
+
+        land_type = land["land_type"]
+        current_level = land["level"]
+        config = BLESSED_LANDS.get(land_type, BLESSED_LANDS[1])
+
+        # 计算回收价格
+        # 1. 基础价格回收50%
+        base_refund = int(config["price"] * 0.5)
+
+        # 2. 计算已升级总花费（从1级升到当前等级）
+        upgrade_spent = 0
+        for lv in range(1, current_level):
+            upgrade_spent += int(config["price"] * lv * 0.5)
+
+        # 3. 升级花费回收70%
+        upgrade_refund = int(upgrade_spent * 0.7)
+
+        # 4. 总回收价
+        total_refund = base_refund + upgrade_refund
+
+        # 给玩家灵石
+        player.gold += total_refund
+        await self.db.update_player(player)
+
+        # 删除洞天记录
+        await self.db.conn.execute(
+            "DELETE FROM blessed_lands WHERE user_id = ?",
+            (player.user_id,)
+        )
+        await self.db.conn.commit()
+
+        msg = (
+            f"💰 洞天转让成功\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"转让洞天：{land['land_name']} Lv.{current_level}\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"初始购买价：{config['price']:,} 灵石\n"
+            f"  回收：{base_refund:,} 灵石（50%）\n"
+        )
+
+        if current_level > 1:
+            msg += (
+                f"升级总投入：{upgrade_spent:,} 灵石\n"
+                f"  回收：{upgrade_refund:,} 灵石（70%）\n"
+            )
+
+        msg += (
+            f"━━━━━━━━━━━━━━━\n"
+            f"获得灵石：+{total_refund:,}\n"
+            f"当前灵石：{player.gold:,}\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"💡 现在可以购买更高级的洞天了"
+        )
+
+        return True, msg
+
     async def get_blessed_land_info(self, user_id: str) -> str:
         """获取洞天信息展示"""
         land = await self.get_user_blessed_land(user_id)
@@ -186,14 +250,30 @@ class BlessedLandManager:
         now = int(time.time())
         hours_since = (now - land["last_collect_time"]) / 3600
         pending_gold = int(min(24, hours_since) * land["gold_per_hour"])
-        
-        return (
-            f"🏔️ {land['land_name']} (Lv.{land['level']})\n"
+
+        # 计算转让回收价（用于展示）
+        land_type = land["land_type"]
+        current_level = land["level"]
+        config = BLESSED_LANDS.get(land_type, BLESSED_LANDS[1])
+        base_refund = int(config["price"] * 0.5)
+        upgrade_spent = sum(int(config["price"] * lv * 0.5) for lv in range(1, current_level))
+        upgrade_refund = int(upgrade_spent * 0.7)
+        total_refund = base_refund + upgrade_refund
+
+        # 检查是否已满级
+        is_max_level = current_level >= config["max_level"]
+        upgrade_tip = "/升级洞天" if not is_max_level else "已满级"
+
+        msg = (
+            f"🏔️ {land['land_name']} (Lv.{land['level']}/{config['max_level']})\n"
             f"━━━━━━━━━━━━━━━\n"
             f"修炼加成：+{land['exp_bonus']:.1%}\n"
             f"每小时产出：{land['gold_per_hour']} 灵石\n"
             f"━━━━━━━━━━━━━━━\n"
             f"待收取：约 {pending_gold:,} 灵石\n"
+            f"转让回收：约 {total_refund:,} 灵石\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"💡 /升级洞天 | /洞天收取"
+            f"💡 {upgrade_tip} | /洞天收取 | /转让洞天"
         )
+
+        return msg

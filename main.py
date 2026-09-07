@@ -146,6 +146,7 @@ CMD_BLESSED_LAND_INFO = "我的洞天"
 CMD_BLESSED_LAND_BUY = "购买洞天"
 CMD_BLESSED_LAND_UPGRADE = "升级洞天"
 CMD_BLESSED_LAND_COLLECT = "洞天收取"
+CMD_BLESSED_LAND_SELL = "转让洞天"
 
 # Phase 4: 灵田
 CMD_SPIRIT_FARM_INFO = "我的灵田"
@@ -1192,6 +1193,12 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_blessed_land_collect(self, event: AstrMessageEvent):
         async for r in self.blessed_land_handlers.handle_collect(event):
+            yield r
+
+    @filter.command(CMD_BLESSED_LAND_SELL, "转让/卖出洞天")
+    @require_whitelist
+    async def handle_blessed_land_sell(self, event: AstrMessageEvent):
+        async for r in self.blessed_land_handlers.handle_sell(event):
             yield r
 
     # ===== Phase 4: 灵田 =====
