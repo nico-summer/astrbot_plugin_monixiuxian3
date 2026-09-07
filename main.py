@@ -317,7 +317,9 @@ class XiuXianPlugin(Star):
 
         # 检查是否已有秘境数据
         existing_rifts = await self.db.ext.get_all_rifts()
-        if existing_rifts:
+
+        # 如果秘境数量已经达到13个，跳过初始化
+        if existing_rifts and len(existing_rifts) >= 13:
             logger.info(f"【秘境系统】已有 {len(existing_rifts)} 个秘境，跳过初始化")
             return
 
@@ -436,18 +438,27 @@ class XiuXianPlugin(Star):
             },
         ]
 
-        # 插入数据库
-        for rift_data in default_rifts:
-            rift = Rift(
-                rift_id=rift_data["rift_id"],
-                rift_name=rift_data["rift_name"],
-                rift_level=rift_data["rift_level"],
-                required_level=rift_data["required_level"],
-                rewards=rift_data["rewards"]
-            )
-            await self.db.ext.create_rift(rift)
+        # 获取已存在的秘境ID
+        existing_rift_ids = set([rift.rift_id for rift in existing_rifts]) if existing_rifts else set()
 
-        logger.info(f"【秘境系统】初始化完成，创建了 {len(default_rifts)} 个秘境")
+        # 只插入缺失的秘境
+        added_count = 0
+        for rift_data in default_rifts:
+            if rift_data["rift_id"] not in existing_rift_ids:
+                rift = Rift(
+                    rift_id=rift_data["rift_id"],
+                    rift_name=rift_data["rift_name"],
+                    rift_level=rift_data["rift_level"],
+                    required_level=rift_data["required_level"],
+                    rewards=rift_data["rewards"]
+                )
+                await self.db.ext.create_rift(rift)
+                added_count += 1
+
+        if added_count > 0:
+            logger.info(f"【秘境系统】新增 {added_count} 个秘境，当前共有 {len(existing_rifts) + added_count} 个秘境")
+        else:
+            logger.info(f"【秘境系统】所有秘境已存在，无需添加")
 
     async def _schedule_boss_spawn(self):
         """Boss定时生成任务（支持持久化和指数退避）"""
