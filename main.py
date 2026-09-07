@@ -112,6 +112,7 @@ CMD_ADVENTURE_INFO = "历练信息"
 # 炼丹系统指令
 CMD_ALCHEMY_RECIPES = "丹药配方"
 CMD_ALCHEMY_CRAFT = "炼丹"
+CMD_MATERIAL_QUERY = "材料查询"
 
 # 传承系统指令
 CMD_IMPART_INFO = "传承信息"
@@ -1053,6 +1054,12 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_alchemy_craft(self, event: AstrMessageEvent, pill_id: int = 0):
         async for r in self.alchemy_handlers.handle_craft(event, pill_id):
+            yield r
+
+    @filter.command(CMD_MATERIAL_QUERY, "查询材料获取途径")
+    @require_whitelist
+    async def handle_material_query(self, event: AstrMessageEvent, material_name: str = ""):
+        async for r in self.alchemy_handlers.handle_material_query(event, material_name):
             yield r
 
     # ===== 传承指令 =====

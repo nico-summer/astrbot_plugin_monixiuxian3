@@ -16,7 +16,25 @@ if TYPE_CHECKING:
 
 class AlchemyManager:
     """炼丹系统管理器（简化版）"""
-    
+
+    # 材料获取途径配置（集中管理，避免到处硬编码）
+    MATERIAL_SOURCES = {
+        "灵草": [
+            {"name": "历练系统", "cmd": "/历练 短途", "desc": "30分钟，掉落1-3个"},
+            {"name": "灵田系统", "cmd": "/种植 灵草", "desc": "1小时成熟后收获"},
+        ],
+        "精铁": [
+            {"name": "历练系统", "cmd": "/历练 短途", "desc": "30分钟，低概率掉落"},
+        ],
+        "灵石碎片": [
+            {"name": "历练系统", "cmd": "/历练 短途", "desc": "30分钟，掉落2-5个"},
+        ],
+        "default": [
+            {"name": "历练系统", "cmd": "/历练", "desc": "通过历练获取"},
+            {"name": "灵田系统", "cmd": "/种植", "desc": "种植灵草类材料"},
+        ]
+    }
+
     def __init__(self, db: DataBase, config_manager: "ConfigManager" = None, storage_ring_manager: "StorageRingManager" = None):
         self.db = db
         self.config_manager = config_manager
@@ -109,7 +127,76 @@ class AlchemyManager:
                 return item
         
         return None
-    
+
+    def _get_material_sources_text(self, material_name: str, compact: bool = False) -> str:
+        """
+        获取材料来源说明文本（集中管理，避免重复代码）
+
+        Args:
+            material_name: 材料名称
+            compact: 是否紧凑模式（用于配方列表）
+
+        Returns:
+            格式化的材料来源文本
+        """
+        sources = self.MATERIAL_SOURCES.get(material_name, self.MATERIAL_SOURCES["default"])
+
+        if compact:
+            # 紧凑模式：用于配方列表
+            source_names = "、".join([s["name"] for s in sources])
+            return f"📍 获取途径：{source_names}"
+        else:
+            # 详细模式：用于材料查询
+            lines = [f"📦 {material_name} - 获取途径", "━━━━━━━━━━━━━━━"]
+            for source in sources:
+                lines.append(f"🔸 {source['name']}：{source['cmd']}（{source['desc']}）")
+            return "\n".join(lines)
+
+    def _get_materials_tips(self, materials: Dict[str, int]) -> str:
+        """
+        生成材料获取提示（用于炼丹失败时）
+
+        Args:
+            materials: 材料字典 {材料名: 数量}
+
+        Returns:
+            材料获取提示文本
+        """
+        tips = ["\n💡 材料获取提示："]
+        mentioned_sources = set()
+
+        for material_name in materials:
+            if material_name == "灵石":
+                continue
+            sources = self.MATERIAL_SOURCES.get(material_name, self.MATERIAL_SOURCES["default"])
+            for source in sources:
+                source_key = f"{source['name']}:{source['cmd']}"
+                if source_key not in mentioned_sources:
+                    tips.append(f"  · {source['name']}：{source['cmd']}")
+                    mentioned_sources.add(source_key)
+
+        return "\n".join(tips) if len(tips) > 1 else ""
+
+    async def query_material_source(self, material_name: str) -> Tuple[bool, str]:
+        """
+        查询材料获取途径（方案B：材料溯源功能）
+
+        Args:
+            material_name: 材料名称
+
+        Returns:
+            (成功标志, 消息)
+        """
+        if material_name == "灵石":
+            return True, "💰 灵石 - 获取途径\n━━━━━━━━━━━━━━━\n🔸 历练系统：完成历练获得灵石奖励\n🔸 挖矿系统：/挖矿（如已开启）\n🔸 出售物品：/出售 <物品>"
+
+        sources = self.MATERIAL_SOURCES.get(material_name)
+        if not sources:
+            # 未知材料，显示通用获取途径
+            return True, self._get_material_sources_text(material_name, compact=False)
+
+        return True, self._get_material_sources_text(material_name, compact=False)
+
     async def get_available_recipes(self, user_id: str) -> Tuple[bool, str]:
         """
         获取可用的丹药配方
@@ -134,16 +221,24 @@ class AlchemyManager:
         
         msg = "🔥 丹药配方\n"
         msg += "━━━━━━━━━━━━━━━\n\n"
-        
+
         for recipe in available_recipes:
             materials_str = ", ".join([f"{k}×{v}" for k, v in recipe["materials"].items()])
             msg += f"【{recipe['name']}】(ID:{recipe['id']})\n"
             msg += f"  需求境界：Lv.{recipe['level_required']}\n"
             msg += f"  材料：{materials_str}\n"
+
+            # 方案A：显示材料获取途径（紧凑模式）
+            # 只显示非灵石材料的获取途径
+            non_gold_materials = [m for m in recipe["materials"].keys() if m != "灵石"]
+            if non_gold_materials:
+                msg += f"  {self._get_material_sources_text(non_gold_materials[0], compact=True)}\n"
+
             msg += f"  成功率：{recipe['success_rate']}%\n"
             msg += f"  效果：{recipe['desc']}\n\n"
-        
-        msg += "使用 /炼丹 <丹药ID> 开始炼制"
+
+        msg += "💡 使用 /炼丹 <丹药ID> 开始炼制\n"
+        msg += "💡 使用 /材料查询 <材料名> 查看详细获取途径"
         
         return True, msg
     
@@ -205,7 +300,9 @@ class AlchemyManager:
             pass
         
         if missing_materials:
-            return False, f"❌ 材料不足！\n" + "\n".join(f"  · {m}" for m in missing_materials), None
+            # 方案D：智能提示材料获取途径
+            tips = self._get_materials_tips(materials)
+            return False, f"❌ 材料不足！\n" + "\n".join(f"  · {m}" for m in missing_materials) + tips, None
         
         # 5. 扣除所有材料
         player.gold -= required_gold
