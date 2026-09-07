@@ -71,6 +71,13 @@ class RiftManager:
             {"name": "涅槃石", "weight": 15, "min": 1, "max": 2},
             {"name": "仙道本源", "weight": 10, "min": 1, "max": 1},
         ],
+        8: [  # 仙境秘境 - 大罗材料
+            {"name": "大罗金精", "weight": 30, "min": 3, "max": 10},
+            {"name": "混元道石", "weight": 25, "min": 2, "max": 6},
+            {"name": "天道碎片", "weight": 20, "min": 1, "max": 4},
+            {"name": "圣灵之心", "weight": 15, "min": 1, "max": 3},
+            {"name": "鸿蒙紫气", "weight": 10, "min": 1, "max": 2},
+        ],
     }
 
     # 秘境装备掉落表（爆率掉落）
@@ -149,6 +156,17 @@ class RiftManager:
                 {"name": "仙玉·大道本源", "type": "饰品", "quality": "仙品", "weight": 20},
             ]
         },
+        8: {  # 仙境秘境
+            "drop_rate": 65,  # 65%爆率
+            "items": [
+                {"name": "大罗剑·斩道", "type": "武器", "quality": "大罗", "weight": 16},
+                {"name": "混元斧·开天", "type": "武器", "quality": "大罗", "weight": 14},
+                {"name": "圣甲·不朽", "type": "防具", "quality": "大罗", "weight": 18},
+                {"name": "道袍·鸿蒙", "type": "防具", "quality": "大罗", "weight": 16},
+                {"name": "圣环·永恒", "type": "饰品", "quality": "大罗", "weight": 18},
+                {"name": "天道印", "type": "饰品", "quality": "大罗", "weight": 18},
+            ]
+        },
     }
 
     # 秘境功法掉落表（低爆率）
@@ -217,6 +235,16 @@ class RiftManager:
                 {"name": "仙道·涅槃重生", "type": "不死秘法", "weight": 20},
                 {"name": "仙法·破碎虚空", "type": "飞升秘技", "weight": 18},
                 {"name": "大道本源经", "type": "终极传承", "weight": 15},
+            ]
+        },
+        8: {  # 仙境秘境
+            "drop_rate": 45,  # 45%爆率
+            "items": [
+                {"name": "大罗金仙诀", "type": "大罗功法", "weight": 25},
+                {"name": "混元无极功", "type": "混元心法", "weight": 22},
+                {"name": "鸿蒙开天经", "type": "开天秘典", "weight": 20},
+                {"name": "天道轮回术", "type": "天道神通", "weight": 18},
+                {"name": "圣人传承", "type": "圣级传承", "weight": 15},
             ]
         },
     }

@@ -318,12 +318,12 @@ class XiuXianPlugin(Star):
         # 检查是否已有秘境数据
         existing_rifts = await self.db.ext.get_all_rifts()
 
-        # 如果秘境数量已经达到13个，跳过初始化
-        if existing_rifts and len(existing_rifts) >= 13:
+        # 如果秘境数量已经达到15个，跳过初始化
+        if existing_rifts and len(existing_rifts) >= 15:
             logger.info(f"【秘境系统】已有 {len(existing_rifts)} 个秘境，跳过初始化")
             return
 
-        # 定义主题秘境（12个秘境，覆盖全境界）
+        # 定义主题秘境（15个秘境，覆盖全境界到仙境）
         default_rifts = [
             # === Lv.1 炼气期秘境（2个）===
             {
@@ -338,8 +338,8 @@ class XiuXianPlugin(Star):
                 "rift_id": 2,
                 "rift_name": "灵兽巢穴",
                 "rift_level": 1,
-                "required_level": 3,
-                "rewards": '{"exp":[1500,4000],"gold":[800,2000]}',
+                "required_level": 9,
+                "rewards": '{"exp":[2000,5000],"gold":[1000,2500]}',
                 "description": "妖兽聚集地，可获得炼器材料"
             },
             # === Lv.2 筑基期秘境（2个）===
@@ -355,8 +355,8 @@ class XiuXianPlugin(Star):
                 "rift_id": 4,
                 "rift_name": "玄冰洞窟",
                 "rift_level": 2,
-                "required_level": 11,
-                "rewards": '{"exp":[4000,10000],"gold":[2000,5000]}',
+                "required_level": 12,
+                "rewards": '{"exp":[5000,12000],"gold":[2500,6000]}',
                 "description": "冰系妖兽盘踞，冰系装备宝地"
             },
             # === Lv.3 金丹期秘境（2个）===
@@ -373,7 +373,7 @@ class XiuXianPlugin(Star):
                 "rift_name": "雷霆试炼地",
                 "rift_level": 3,
                 "required_level": 15,
-                "rewards": '{"exp":[10000,25000],"gold":[6000,15000]}',
+                "rewards": '{"exp":[12000,28000],"gold":[7000,16000]}',
                 "description": "雷属性修士的试炼圣地"
             },
             # === Lv.4 元婴期秘境（2个）===
@@ -396,45 +396,62 @@ class XiuXianPlugin(Star):
             # === Lv.5 化神-炼虚期秘境（2个）===
             {
                 "rift_id": 9,
-                "rift_name": "虚空裂缝",
+                "rift_name": "九幽黄泉路",
                 "rift_level": 5,
-                "required_level": 19,
-                "rewards": '{"exp":[100000,250000],"gold":[50000,120000]}',
-                "description": "空间法则流转之地，虚空装备现世"
+                "required_level": 20,
+                "rewards": '{"exp":[150000,350000],"gold":[75000,180000]}',
+                "description": "化神期法则之力流转，生死轮回之地"
             },
             {
                 "rift_id": 10,
-                "rift_name": "仙陨战场",
+                "rift_name": "上古战场",
                 "rift_level": 5,
-                "required_level": 22,
-                "rewards": '{"exp":[200000,500000],"gold":[100000,250000]}',
-                "description": "上古仙魔大战遗迹，仙器碎片遍地"
+                "required_level": 24,
+                "rewards": '{"exp":[300000,700000],"gold":[150000,350000]}',
+                "description": "炼虚期大能的战场遗迹，空间法则碎片散落"
             },
             # === Lv.6 合体-大乘期秘境（2个）===
             {
                 "rift_id": 11,
                 "rift_name": "混沌神殿",
                 "rift_level": 6,
-                "required_level": 25,
-                "rewards": '{"exp":[500000,1200000],"gold":[250000,600000]}',
-                "description": "混沌初开之地，神级功法传承"
+                "required_level": 27,
+                "rewards": '{"exp":[800000,1800000],"gold":[400000,900000]}',
+                "description": "合体期领悟混沌之力的圣地"
             },
             {
                 "rift_id": 12,
-                "rift_name": "诸天万界塔",
+                "rift_name": "万界战场",
                 "rift_level": 6,
-                "required_level": 28,
-                "rewards": '{"exp":[1000000,2500000],"gold":[500000,1200000]}',
-                "description": "连接诸天万界的至尊试炼塔"
+                "required_level": 29,
+                "rewards": '{"exp":[1500000,3500000],"gold":[750000,1800000]}',
+                "description": "大乘期修士征战诸天的试炼场"
             },
-            # === Lv.7 渡劫期+秘境（1个）===
+            # === Lv.7 渡劫期秘境（1个）===
             {
                 "rift_id": 13,
-                "rift_name": "仙界试炼地",
+                "rift_name": "九天劫雷场",
                 "rift_level": 7,
                 "required_level": 30,
                 "rewards": '{"exp":[3000000,8000000],"gold":[1500000,4000000]}',
-                "description": "仙界入口的最终考验，仙品装备与传承"
+                "description": "渡劫期修士面对天劫的试炼之地"
+            },
+            # === Lv.8 仙境秘境（2个）===
+            {
+                "rift_id": 14,
+                "rift_name": "仙道试炼",
+                "rift_level": 8,
+                "required_level": 31,
+                "rewards": '{"exp":[8000000,20000000],"gold":[4000000,10000000]}',
+                "description": "地仙境界的仙道考验，通向更高境界"
+            },
+            {
+                "rift_id": 15,
+                "rift_name": "诸天战场",
+                "rift_level": 8,
+                "required_level": 32,
+                "rewards": '{"exp":[15000000,40000000],"gold":[8000000,20000000]}',
+                "description": "天仙征战诸天的无上战场"
             },
         ]
 
