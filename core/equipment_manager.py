@@ -50,7 +50,7 @@ class EquipmentManager:
 
         # 旧格式兼容：处理 items.json 中的法器（equip_effects 格式）
         if "equip_effects" in item_config:
-            equip_effects = item_config["equip_effects"]
+            equip_effects = item_config.get("equip_effects") or {}
             # 旧格式 attack -> physical_damage
             if "attack" in equip_effects:
                 physical_damage = equip_effects["attack"]

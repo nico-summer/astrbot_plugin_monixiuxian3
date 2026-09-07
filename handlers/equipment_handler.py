@@ -1,5 +1,8 @@
+import re
+
 # handlers/equipment_handler.py
 
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from ..data import DataBase
 from ..core import EquipmentManager, PillManager, StorageRingManager
@@ -97,37 +100,22 @@ class EquipmentHandler:
     @player_required
     async def handle_equip_item(self, player: Player, event: AstrMessageEvent, item_name: str):
         """装备物品"""
-        if not item_name or item_name.strip() == "":
+        item_name = self._normalize_command_argument(event, item_name, CMD_EQUIP_ITEM)
+        if not item_name:
             yield event.plain_result(f"请指定要装备的物品名称\n用法：{CMD_EQUIP_ITEM} 物品名称")
             return
 
-        item_name = item_name.strip()
-
-        # 检查物品是否存在于配置中（先查items再查weapons）
-        item_config = self.config_manager.items_data.get(item_name)
-        if not item_config:
-            item_config = self.config_manager.weapons_data.get(item_name)
-
-        if not item_config:
+        item = self.equipment_manager.parse_item_from_name(
+            item_name,
+            self.config_manager.items_data,
+            self.config_manager.weapons_data,
+        )
+        if not item:
             yield event.plain_result(f"未找到物品：{item_name}")
             return
 
-        # 检查物品类型是否可装备
-        item_type = item_config.get("type", "")
-        equippable_types = ["weapon", "armor", "main_technique", "technique"]
-        
-        # 兼容旧格式
-        if item_type == "法器":
-            subtype = item_config.get("subtype", "")
-            if subtype == "武器":
-                item_type = "weapon"
-            elif subtype == "防具":
-                item_type = "armor"
-        elif item_type == "功法":
-            item_type = "technique"
-        
-        if item_type not in equippable_types:
-            yield event.plain_result(f"【{item_name}】不是可装备的物品类型")
+        if item.item_type not in {"weapon", "armor", "main_technique", "technique"}:
+            yield event.plain_result(f"【{item_name}】暂不支持装备（饰品暂未开放独立装备栏）")
             return
 
         # 检查储物戒中是否有该物品
@@ -144,26 +132,14 @@ class EquipmentHandler:
             yield event.plain_result(f"❌ 无法从储物戒取出装备：{retrieve_msg}")
             return
 
-        # 创建Item对象
-        from ..models import Item
-        item = Item(
-            item_id=item_config.get("id", item_name),
-            name=item_name,
-            item_type=item_type,
-            description=item_config.get("description", ""),
-            rank=item_config.get("rank", ""),
-            required_level_index=item_config.get("required_level_index", 0),
-            weapon_category=item_config.get("weapon_category", ""),
-            magic_damage=item_config.get("magic_damage", 0),
-            physical_damage=item_config.get("physical_damage", 0),
-            magic_defense=item_config.get("magic_defense", 0),
-            physical_defense=item_config.get("physical_defense", 0),
-            mental_power=item_config.get("mental_power", 0),
-            exp_multiplier=item_config.get("exp_multiplier", 0.0),
-            spiritual_qi=item_config.get("spiritual_qi", 0),
-            blood_qi=item_config.get("blood_qi", 0),
-            lifespan=item_config.get("lifespan", 0)
-        )
+        user_id = player.user_id
+        player = await self.db.get_player_by_id(user_id)
+        if not player:
+            logger.error(
+                f"装备失败后无法返还物品：user_id={user_id}, item={item_name}, reason=玩家数据不存在"
+            )
+            yield event.plain_result("❌ 装备失败：玩家数据不存在，物品返还失败，请联系管理员")
+            return
 
         # 装备物品
         success, message = await self.equipment_manager.equip_item(player, item)
@@ -182,9 +158,25 @@ class EquipmentHandler:
             await self.storage_ring_manager.store_item(player, item_name, 1, silent=True)
             yield event.plain_result(f"❌ {message}")
 
+    @staticmethod
+    def _normalize_command_argument(event: AstrMessageEvent, argument: str, command: str) -> str:
+        """清理命令参数中可能残留的唤醒词。"""
+        value = (argument or "").strip()
+        pattern = re.compile(rf"^[^\w\s]*\s*{re.escape(command)}\s*", re.IGNORECASE)
+        value = pattern.sub("", value, count=1).strip()
+        if value:
+            return value
+
+        try:
+            message_text = (event.get_message_str() or "").strip()
+        except Exception:
+            message_text = ""
+        return pattern.sub("", message_text, count=1).strip()
+
     @player_required
     async def handle_unequip_item(self, player: Player, event: AstrMessageEvent, slot_or_name: str):
         """卸下装备"""
+        slot_or_name = self._normalize_command_argument(event, slot_or_name, CMD_UNEQUIP_ITEM)
         if not slot_or_name or slot_or_name.strip() == "":
             yield event.plain_result(
                 f"请指定要卸下的装备\n"

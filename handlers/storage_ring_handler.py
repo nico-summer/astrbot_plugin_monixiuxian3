@@ -1,5 +1,7 @@
 # handlers/storage_ring_handler.py
 
+import re
+
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.all import At, Plain
 from ..data import DataBase
@@ -255,27 +257,39 @@ class StorageRingHandler:
 
         # 从消息链中提取 At 组件和 Plain 文本
         text_parts = []
-        message_chain = event.message_obj.message if hasattr(event, 'message_obj') and event.message_obj else []
+        message_obj = getattr(event, "message_obj", None)
+        message_chain = getattr(message_obj, "message", []) or []
         
         for comp in message_chain:
             if isinstance(comp, At):
                 # 兼容多种At属性名
                 if target_id is None:
-                    if hasattr(comp, 'qq'):
-                        target_id = str(comp.qq)
-                    elif hasattr(comp, 'target'):
-                        target_id = str(comp.target)
-                    elif hasattr(comp, 'uin'):
-                        target_id = str(comp.uin)
+                    for attr_name in ("qq", "target", "uin", "user_id"):
+                        target_value = getattr(comp, attr_name, None)
+                        if target_value is not None and str(target_value).strip():
+                            target_id = str(target_value).strip()
+                            break
             elif isinstance(comp, Plain):
-                text_parts.append(comp.text)
+                text_parts.append(str(getattr(comp, "text", "") or ""))
 
-        # 合并文本内容并移除命令前缀
-        text_content = "".join(text_parts).strip()
-        for prefix in ["#赠予", "/赠予", "赠予"]:
-            if text_content.startswith(prefix):
-                text_content = text_content[len(prefix):].strip()
-                break
+        plain_text = "".join(text_parts).strip()
+        text_content = (args or plain_text or "").strip()
+
+        text_content = re.sub(
+            rf"^[^\w\s]*\s*{re.escape(CMD_GIFT_ITEM)}",
+            "",
+            text_content,
+            count=1,
+        ).strip()
+
+        if target_id and text_content:
+            text_content = re.sub(
+                r"^(?:@[^\s]+|\[CQ:at,[^\]]+\]|<at[^>]*>)\s*",
+                "",
+                text_content,
+                count=1,
+                flags=re.IGNORECASE,
+            ).strip()
         
         # 如果没有从At组件获取到target_id，尝试从文本解析纯数字QQ号
         if not target_id and text_content:
@@ -288,7 +302,7 @@ class StorageRingHandler:
 
         # 解析物品名和数量
         if text_content:
-            parts = text_content.rsplit(" ", 1)
+            parts = text_content.rsplit(None, 1)
             if len(parts) == 2 and parts[1].isdigit():
                 item_name = parts[0].strip()
                 count = int(parts[1])
@@ -327,7 +341,7 @@ class StorageRingHandler:
             yield event.plain_result(f"目标玩家（QQ:{target_id}）尚未开始修仙")
             return
 
-        if target_id == player.user_id:
+        if target_id == str(player.user_id):
             yield event.plain_result("不能赠予物品给自己")
             return
 
@@ -339,14 +353,19 @@ class StorageRingHandler:
 
         # 存储待处理的赠予请求到数据库
         sender_name = event.get_sender_name()
-        await self.db.ext.create_pending_gift(
-            receiver_id=target_id,
-            sender_id=player.user_id,
-            sender_name=sender_name,
-            item_name=item_name,
-            count=count,
-            expires_hours=24  # 24小时后过期
-        )
+        try:
+            await self.db.ext.create_pending_gift(
+                receiver_id=target_id,
+                sender_id=player.user_id,
+                sender_name=sender_name,
+                item_name=item_name,
+                count=count,
+                expires_hours=24  # 24小时后过期
+            )
+        except Exception:
+            await self.storage_ring_manager.store_item(player, item_name, count, silent=True)
+            yield event.plain_result("赠予失败：无法创建赠予请求，物品已返还")
+            return
 
         yield event.plain_result(
             f"📦 赠予请求已发送！\n"

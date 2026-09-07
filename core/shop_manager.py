@@ -55,7 +55,7 @@ class ShopManager:
                 all_items.append({
                     'id': item.get('id', item['name']),
                     'name': item['name'],
-                    'type': item['type'],
+                    'type': self._map_legacy_item_type(item),
                     'price': item['price'],
                     'weight': item['shop_weight'],
                     'rank': item.get('rank', '凡品'),

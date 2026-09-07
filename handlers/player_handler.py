@@ -161,7 +161,12 @@ class PlayerHandler:
         # 获取装备信息
         weapon_name = player.weapon if player.weapon else "无"
         armor_name = player.armor if player.armor else "无"
-        technique_name = player.main_technique if player.main_technique else "无"
+        main_technique_name = player.main_technique if player.main_technique else "无"
+        technique_items = {
+            item.name: item for item in equipped_items
+            if item.item_type == "technique"
+        }
+        techniques_list = player.get_techniques_list()
         
         # 获取突破状态
         breakthrough_rate = f"+{player.level_up_rate}%" if player.level_up_rate > 0 else "0%"
@@ -211,9 +216,20 @@ class PlayerHandler:
         reply_msg += (
             f"\n"
             f"【装备信息】\n"
-            f"  主修功法：{technique_name}\n"
+            f"  主修心法：{main_technique_name}\n"
             f"  法器：{weapon_name}\n"
             f"  防具：{armor_name}\n"
+            f"  功法：{len(techniques_list)}/3\n"
+        )
+        if techniques_list:
+            for technique_name in techniques_list:
+                item = technique_items.get(technique_name)
+                attribute_text = item.get_attribute_display() if item else "属性读取失败"
+                reply_msg += f"    · {technique_name}：{attribute_text}\n"
+        else:
+            reply_msg += "    · 未装备\n"
+
+        reply_msg += (
             f"\n"
             f"【宗门信息】\n"
             f"  所在宗门：{sect_name}\n"

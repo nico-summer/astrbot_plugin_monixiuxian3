@@ -12,3 +12,6 @@ env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+#ai工具
+.claude/

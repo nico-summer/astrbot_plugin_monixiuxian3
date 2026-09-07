@@ -6,6 +6,7 @@ from astrbot.api.event import AstrMessageEvent
 from astrbot.api.all import *
 from ..managers.combat_manager import CombatManager, CombatStats
 from ..data.data_manager import DataBase
+from ..core import EquipmentManager
 from .utils import player_required
 from ..models import Player
 from ..models_extended import UserStatus
@@ -95,27 +96,16 @@ class CombatHandlers:
         bonus = {"atk": 0, "defense": 0}
         if not self.config_manager:
             return bonus
-            
-        # 武器
-        if player.weapon and player.weapon in self.config_manager.weapons_data:
-            data = self.config_manager.weapons_data[player.weapon]
-            bonus["atk"] += data.get("atk", 0)
-            bonus["atk"] += data.get("physical_damage", 0)
-            bonus["atk"] += data.get("magic_damage", 0)
-        
-        # 防具
-        if player.armor and player.armor in self.config_manager.items_data:
-            data = self.config_manager.items_data[player.armor]
-            bonus["defense"] += data.get("physical_defense", 0)
-            bonus["defense"] += data.get("magic_defense", 0)
 
-        # 普通功法提供被动攻防加成
-        for technique_name in player.get_techniques_list():
-            data = self.config_manager.items_data.get(technique_name, {})
-            bonus["atk"] += data.get("physical_damage", 0)
-            bonus["atk"] += data.get("magic_damage", 0)
-            bonus["defense"] += data.get("physical_defense", 0)
-            bonus["defense"] += data.get("magic_defense", 0)
+        equipment_manager = EquipmentManager(self.db, self.config_manager)
+        equipped_items = equipment_manager.get_equipped_items(
+            player,
+            self.config_manager.items_data,
+            self.config_manager.weapons_data,
+        )
+        for item in equipped_items:
+            bonus["atk"] += item.physical_damage + item.magic_damage
+            bonus["defense"] += item.physical_defense + item.magic_defense
             
         return bonus
 
