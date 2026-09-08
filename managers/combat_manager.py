@@ -48,22 +48,41 @@ class CombatManager:
         return hp, mp
     
     @staticmethod
-    def calculate_atk(experience: int, atkpractice: int = 0, atk_buff: float = 0.0) -> int:
+    def calculate_atk(
+        experience: int,
+        cultivation_type: str = "灵修",
+        magic_damage: int = 0,
+        physical_damage: int = 0,
+        atkpractice: int = 0,
+        atk_buff: float = 0.0
+    ) -> int:
         """
-        根据修为和攻击修炼等级计算攻击力
-        
+        根据修为、修炼类型和伤害属性计算攻击力
+
         Args:
             experience: 修为
+            cultivation_type: 修炼类型（灵修或体修）
+            magic_damage: 法伤
+            physical_damage: 物伤
             atkpractice: 攻击修炼等级（每级提升4%攻击力）
             atk_buff: 额外攻击加成百分比
-            
+
         Returns:
             攻击力
         """
         base_atk = experience // 10
+
+        # 根据修炼类型计算伤害加成
+        # 灵修：法伤100% + 物伤70%（精神力高，能量转化效率强）
+        # 体修：物伤100% + 法伤40%（肉体强，难以驾驭法术能量）
+        if cultivation_type == "灵修":
+            damage_bonus = magic_damage + int(physical_damage * 0.7)
+        else:  # 体修
+            damage_bonus = physical_damage + int(magic_damage * 0.4)
+
         practice_bonus = atkpractice * 0.04  # 每级4%加成
-        total_atk = int(base_atk * (1 + practice_bonus + atk_buff))
-        
+        total_atk = int((base_atk + damage_bonus) * (1 + practice_bonus + atk_buff))
+
         return max(total_atk, 1)  # 至少为1
     
     @staticmethod

@@ -197,7 +197,7 @@ class XiuXianPlugin(Star):
         
         self.combat_mgr = CombatManager()
         self.sect_mgr = SectManager(self.db, self.config_manager)
-        self.boss_mgr = BossManager(self.db, self.combat_mgr, self.config_manager, self.storage_ring_mgr)
+        self.boss_mgr = BossManager(self.db, self.combat_mgr, self.config_manager, self.storage_ring_mgr, self.equipment_mgr)
         self.rift_mgr = RiftManager(self.db, self.config_manager, self.storage_ring_mgr)
         self.rank_mgr = RankingManager(self.db, self.combat_mgr, self.config_manager)
         self.adventure_mgr = AdventureManager(self.db, self.storage_ring_mgr)
@@ -801,8 +801,20 @@ class XiuXianPlugin(Star):
             player.experience, impart.impart_hp_per if impart else 0.0,
             impart.impart_mp_per if impart else 0.0,
         )
+
+        # 获取玩家装备属性
+        equipped_items = self.equipment_mgr.get_equipped_items(
+            player, self.config_manager.items_data, self.config_manager.weapons_data
+        )
+        total_attrs = player.get_total_attributes(equipped_items)
+
         player.atk = self.combat_mgr.calculate_atk(
-            player.experience, player.atkpractice, impart.impart_atk_per if impart else 0.0,
+            player.experience,
+            player.cultivation_type,
+            total_attrs.get('magic_damage', player.magic_damage),
+            total_attrs.get('physical_damage', player.physical_damage),
+            player.atkpractice,
+            impart.impart_atk_per if impart else 0.0,
         )
         await self.db.update_player(player)
         await self.db.ext.record_recovery_use(player.user_id, window_start or now, use_count + 1)

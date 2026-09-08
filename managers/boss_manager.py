@@ -61,10 +61,12 @@ class BossManager:
         ],
     }
     
-    def __init__(self, db: DataBase, combat_mgr: CombatManager, config_manager=None, storage_ring_manager: "StorageRingManager" = None):
+    def __init__(self, db: DataBase, combat_mgr: CombatManager, config_manager=None, storage_ring_manager: "StorageRingManager" = None, equipment_manager=None):
         self.db = db
         self.combat_mgr = combat_mgr
         self.storage_ring_manager = storage_ring_manager
+        self.equipment_manager = equipment_manager
+        self.config_manager = config_manager
         self.config = config_manager.boss_config if config_manager else {}
         self.levels = self.config.get("levels", self.BOSS_LEVELS)
         self._challenge_lock = asyncio.Lock()
@@ -213,34 +215,51 @@ ATK：{atk}
         mp_buff = impart_info.impart_mp_per if impart_info else 0.0
         atk_buff = impart_info.impart_atk_per if impart_info else 0.0
         crit_rate_buff = impart_info.impart_know_per if impart_info else 0.0
-        
-        # 计算HP/MP/ATK
-        if player.atk == 0 or player.mp == 0:
-            # 如果没有初始化战斗属性，先计算
-            hp, mp = self.combat_mgr.calculate_hp_mp(player.experience, hp_buff, mp_buff)
-            atk = self.combat_mgr.calculate_atk(player.experience, player.atkpractice, atk_buff)
-            player.hp = hp
-            player.mp = mp
-            player.atk = atk
-            await self.db.update_player(player)
+
+        # 获取玩家装备属性（法伤/物伤）
+        magic_damage = player.magic_damage
+        physical_damage = player.physical_damage
+
+        # 如果有equipment_manager和config_manager，获取装备加成
+        if self.equipment_manager and self.config_manager:
+            equipped_items = self.equipment_manager.get_equipped_items(
+                player,
+                self.config_manager.items_data,
+                self.config_manager.weapons_data
+            )
+            total_attrs = player.get_total_attributes(equipped_items)
+            magic_damage = total_attrs.get('magic_damage', player.magic_damage)
+            physical_damage = total_attrs.get('physical_damage', player.physical_damage)
+
+        # 每次都重新计算HP/MP/ATK（修复：不再使用缓存的旧值）
+        hp, mp = self.combat_mgr.calculate_hp_mp(player.experience, hp_buff, mp_buff)
+        atk = self.combat_mgr.calculate_atk(
+            player.experience,
+            player.cultivation_type,
+            magic_damage,
+            physical_damage,
+            player.atkpractice,
+            atk_buff
+        )
+
+        # 如果HP为0，说明上次战斗耗尽，使用满HP；否则使用当前HP
+        if player.hp <= 0:
+            current_hp = hp
         else:
-            # 使用现有属性
-            hp = player.hp
-            mp = player.mp
-            atk = player.atk
+            current_hp = player.hp
 
         # 初始化后仍为0，说明上次战斗已耗尽，必须先恢复
-        if hp <= 0:
+        if current_hp <= 0:
             return False, "❌ 你的战斗气血已耗尽，请先使用「恢复」恢复气血后再挑战！", None
-        
+
         # 创建玩家战斗属性
         player_stats = CombatStats(
             user_id=user_id,
             name=player.user_name if player.user_name else f"道友{user_id[:6]}",
-            hp=hp,
-            max_hp=int(player.experience * (1 + hp_buff) // 2),
-            mp=mp,
-            max_mp=int(player.experience * (1 + mp_buff)),
+            hp=current_hp,
+            max_hp=hp,
+            mp=player.mp if player.mp > 0 else mp,
+            max_mp=mp,
             atk=atk,
             defense=0,  # 可以根据装备添加
             crit_rate=int(crit_rate_buff * 100),  # 转换为百分比

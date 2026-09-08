@@ -113,24 +113,45 @@ class CombatHandlers:
         player = await self.db.get_player_by_id(user_id)
         if not player:
             return None
-        
+
         # 获取基础属性
         # 注意：这里我们重新计算属性以确保即时性，特别是Buff
         impart_info = await self.db.ext.get_impart_info(user_id)
         hp_buff = impart_info.impart_hp_per if impart_info else 0.0
         mp_buff = impart_info.impart_mp_per if impart_info else 0.0
         atk_buff = impart_info.impart_atk_per if impart_info else 0.0
-        
+
         # 计算属性
         max_hp, max_mp = self.combat_mgr.calculate_hp_mp(player.experience, hp_buff, mp_buff)
         hp, mp = (max_hp, max_mp) if restore or player.atk == 0 else (player.hp, player.mp)
-        base_atk = self.combat_mgr.calculate_atk(player.experience, player.atkpractice, atk_buff)
+
+        # 获取装备属性（法伤/物伤）
+        magic_damage = player.magic_damage
+        physical_damage = player.physical_damage
+        if self.config_manager:
+            from ..core import EquipmentManager
+            equipment_mgr = EquipmentManager(self.db, self.config_manager)
+            equipped_items = equipment_mgr.get_equipped_items(
+                player, self.config_manager.items_data, self.config_manager.weapons_data
+            )
+            total_attrs = player.get_total_attributes(equipped_items)
+            magic_damage = total_attrs.get('magic_damage', player.magic_damage)
+            physical_damage = total_attrs.get('physical_damage', player.physical_damage)
+
+        base_atk = self.combat_mgr.calculate_atk(
+            player.experience,
+            player.cultivation_type,
+            magic_damage,
+            physical_damage,
+            player.atkpractice,
+            atk_buff
+        )
         active_effects = player.get_active_pill_effects()
         now = int(time.time())
         for effect in active_effects:
             if effect.get("expiry_time", 0) > now and effect.get("subtype") in {"duel_debuff", "duel_buff"}:
                 base_atk = int(base_atk * effect.get("attack_multiplier", 1.0))
-        
+
         # 加上装备加成
         equip_bonus = self._calculate_equipment_bonus(player)
         final_atk = base_atk + equip_bonus["atk"]
@@ -139,7 +160,7 @@ class CombatHandlers:
             if effect.get("expiry_time", 0) > now and effect.get("subtype") in {"duel_debuff", "duel_buff"}:
                 defense_multiplier *= effect.get("defense_multiplier", 1.0)
         final_defense = int(equip_bonus["defense"] * defense_multiplier)
-        
+
         # 更新Player对象（可选，为了持久化）
         player.hp = hp
         player.mp = mp
