@@ -192,9 +192,10 @@ class XiuXianPlugin(Star):
         self.storage_ring_handler = StorageRingHandler(self.db, self.config_manager)
         
         # 初始化核心管理器
-        from .core import StorageRingManager
+        from .core import StorageRingManager, EquipmentManager
         self.storage_ring_mgr = StorageRingManager(self.db, self.config_manager)
-        
+        self.equipment_mgr = EquipmentManager(self.db, self.config_manager, self.storage_ring_mgr)
+
         self.combat_mgr = CombatManager()
         self.sect_mgr = SectManager(self.db, self.config_manager)
         self.boss_mgr = BossManager(self.db, self.combat_mgr, self.config_manager, self.storage_ring_mgr, self.equipment_mgr)
