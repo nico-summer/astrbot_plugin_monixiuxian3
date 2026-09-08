@@ -73,12 +73,12 @@ class CombatManager:
         base_atk = experience // 10
 
         # 根据修炼类型计算伤害加成
-        # 灵修：法伤100% + 物伤70%（精神力高，能量转化效率强）
-        # 体修：物伤100% + 法伤40%（肉体强，难以驾驭法术能量）
+        # 灵修：法伤×12 + 物伤×7（精神力高，能量转化效率强）
+        # 体修：物伤×19 + 法伤×7（肉体强，但也能运用部分法术能量）
         if cultivation_type == "灵修":
-            damage_bonus = magic_damage + int(physical_damage * 0.7)
+            damage_bonus = magic_damage * 12 + physical_damage * 7
         else:  # 体修
-            damage_bonus = physical_damage + int(magic_damage * 0.4)
+            damage_bonus = physical_damage * 19 + magic_damage * 7
 
         practice_bonus = atkpractice * 0.04  # 每级4%加成
         total_atk = int((base_atk + damage_bonus) * (1 + practice_bonus + atk_buff))
