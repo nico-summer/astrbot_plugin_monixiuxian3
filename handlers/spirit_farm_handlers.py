@@ -29,7 +29,7 @@ class SpiritFarmHandlers:
         yield event.plain_result(msg)
     
     @player_required
-    async def handle_plant(self, player: Player, event: AstrMessageEvent, herb_name: str = ""):
+    async def handle_plant(self, player: Player, event: AstrMessageEvent, herb_name: str = "", count_str: str = ""):
         """种植灵草"""
         if not herb_name.strip():
             yield event.plain_result(
@@ -41,12 +41,32 @@ class SpiritFarmHandlers:
                 "火焰花 - 8小时 (修为+10000)\n"
                 "九叶灵芝 - 24小时 (修为+30000)\n"
                 "━━━━━━━━━━━━━━━\n"
-                "💡 使用 /种植 <灵草名>"
+                "💡 使用 /种植 <灵草名> [数量]"
             )
             return
-        
-        success, msg = await self.mgr.plant_herb(player, herb_name.strip())
-        yield event.plain_result(msg)
+
+        herb_name = herb_name.strip()
+
+        # 检查是否指定数量（批量种植）
+        if count_str.strip():
+            try:
+                count = int(count_str.strip())
+                if count <= 0:
+                    yield event.plain_result("❌ 数量必须大于0！")
+                    return
+                if count == 1:
+                    # 数量为1时使用单个种植
+                    success, msg = await self.mgr.plant_herb(player, herb_name)
+                else:
+                    # 批量种植
+                    success, msg = await self.mgr.batch_plant_herb(player, herb_name, count)
+                yield event.plain_result(msg)
+            except ValueError:
+                yield event.plain_result("❌ 数量必须是正整数！")
+        else:
+            # 单个种植
+            success, msg = await self.mgr.plant_herb(player, herb_name)
+            yield event.plain_result(msg)
     
     @player_required
     async def handle_harvest(self, player: Player, event: AstrMessageEvent):

@@ -1398,8 +1398,8 @@ class XiuXianPlugin(Star):
 
     @filter.command(CMD_SPIRIT_FARM_PLANT, "种植灵草")
     @require_whitelist
-    async def handle_spirit_farm_plant(self, event: AstrMessageEvent, herb_name: str = ""):
-        async for r in self.spirit_farm_handlers.handle_plant(event, herb_name):
+    async def handle_spirit_farm_plant(self, event: AstrMessageEvent, herb_name: str = "", count: str = ""):
+        async for r in self.spirit_farm_handlers.handle_plant(event, herb_name, count):
             yield r
 
     @filter.command(CMD_SPIRIT_FARM_HARVEST, "收获灵草")

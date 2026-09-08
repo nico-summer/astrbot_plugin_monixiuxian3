@@ -86,41 +86,93 @@ class SpiritFarmManager:
         if herb_name not in SPIRIT_HERBS:
             herbs_list = "、".join(SPIRIT_HERBS.keys())
             return False, f"❌ 未知的灵草。可种植：{herbs_list}"
-        
+
         farm = await self.get_user_farm(player.user_id)
         if not farm:
             return False, "❌ 你还没有灵田！使用 /开垦灵田"
-        
+
         level_config = FARM_LEVELS.get(farm["level"], FARM_LEVELS[1])
         max_slots = level_config["slots"]
         crops = farm["crops"]
-        
+
         if len(crops) >= max_slots:
             return False, f"❌ 灵田已满！最多种植 {max_slots} 株。"
-        
+
         # 种植
         herb_config = SPIRIT_HERBS[herb_name]
         plant_time = int(time.time())
         mature_time = plant_time + herb_config["grow_time"]
-        
+
         crops.append({
             "name": herb_name,
             "plant_time": plant_time,
             "mature_time": mature_time
         })
-        
+
         await self.db.conn.execute(
             "UPDATE spirit_farms SET crops = ? WHERE user_id = ?",
             (json.dumps(crops), player.user_id)
         )
         await self.db.conn.commit()
-        
+
         grow_hours = herb_config["grow_time"] // 3600
         return True, (
             f"🌱 成功种植【{herb_name}】！\n"
             f"成熟时间：约 {grow_hours} 小时\n"
             f"当前种植：{len(crops)}/{max_slots}"
         )
+
+    async def batch_plant_herb(self, player: Player, herb_name: str, count: int) -> Tuple[bool, str]:
+        """批量种植灵草"""
+        if herb_name not in SPIRIT_HERBS:
+            herbs_list = "、".join(SPIRIT_HERBS.keys())
+            return False, f"❌ 未知的灵草。可种植：{herbs_list}"
+
+        farm = await self.get_user_farm(player.user_id)
+        if not farm:
+            return False, "❌ 你还没有灵田！使用 /开垦灵田"
+
+        level_config = FARM_LEVELS.get(farm["level"], FARM_LEVELS[1])
+        max_slots = level_config["slots"]
+        crops = farm["crops"]
+
+        # 计算可种植数量
+        available_slots = max_slots - len(crops)
+
+        if available_slots <= 0:
+            return False, f"❌ 灵田已满！最多种植 {max_slots} 株。"
+
+        # 实际种植数量：取用户请求数量和可用格子数的较小值
+        actual_count = min(count, available_slots)
+
+        # 批量种植
+        herb_config = SPIRIT_HERBS[herb_name]
+        plant_time = int(time.time())
+        mature_time = plant_time + herb_config["grow_time"]
+
+        for _ in range(actual_count):
+            crops.append({
+                "name": herb_name,
+                "plant_time": plant_time,
+                "mature_time": mature_time
+            })
+
+        await self.db.conn.execute(
+            "UPDATE spirit_farms SET crops = ? WHERE user_id = ?",
+            (json.dumps(crops), player.user_id)
+        )
+        await self.db.conn.commit()
+
+        grow_hours = herb_config["grow_time"] // 3600
+        msg = f"🌱 批量种植成功！\n"
+        msg += f"种植：【{herb_name}】×{actual_count}\n"
+        msg += f"成熟时间：约 {grow_hours} 小时\n"
+        msg += f"当前种植：{len(crops)}/{max_slots}"
+
+        if actual_count < count:
+            msg += f"\n⚠️ 灵田空间不足，只种植了 {actual_count} 株"
+
+        return True, msg
     
     async def harvest(self, player: Player) -> Tuple[bool, str]:
         """收获灵草"""
