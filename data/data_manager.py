@@ -195,7 +195,9 @@ class DataBase:
                 storage_ring = ?,
                 storage_ring_items = ?,
                 daily_pill_usage = ?,
-                last_daily_reset = ?
+                last_daily_reset = ?,
+                rift_daily_count = ?,
+                rift_count_reset_date = ?
             WHERE user_id = ?
             """,
             (
@@ -243,6 +245,8 @@ class DataBase:
                 player.storage_ring_items,
                 player.daily_pill_usage,
                 player.last_daily_reset,
+                player.rift_daily_count,
+                player.rift_count_reset_date,
                 player.user_id
             )
         )

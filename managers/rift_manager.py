@@ -560,7 +560,12 @@ class RiftManager:
             if all_lines:
                 item_msg = "\n\n✨ 获得物品：\n" + "\n".join(all_lines)
 
-        # 7. 增加每日秘境探索次数计数
+        # 7. 重新获取最新的 player 对象（因为 store_item 可能已经更新了数据库）
+        player = await self.db.get_player_by_id(user_id)
+        if not player:
+            return False, "❌ 玩家数据异常！", None
+
+        # 8. 增加每日秘境探索次数计数
         today = datetime.now().strftime("%Y-%m-%d")
         daily_count = player.get_rift_daily_count()
 
@@ -574,12 +579,12 @@ class RiftManager:
         daily_count[rift_id_str] = daily_count.get(rift_id_str, 0) + 1
         player.set_rift_daily_count(daily_count)
 
-        # 8. 应用奖励
+        # 9. 应用奖励
         player.experience += exp_reward
         player.gold += gold_reward
         await self.db.update_player(player)
 
-        # 9. 清除CD
+        # 10. 清除CD
         await self.db.ext.set_user_free(user_id)
 
         # 计算剩余次数
