@@ -44,24 +44,43 @@ class PillHandler:
         Args:
             player: 玩家对象
             event: 事件对象
-            pill_name: 丹药名称
+            pill_name: 丹药名称（可包含数量，格式：丹药名 数量）
         """
         # 检查是否提供了丹药名称
         if not pill_name or pill_name.strip() == "":
             yield event.plain_result(
                 "请指定要服用的丹药名称！\n"
-                f"💡 使用方法：{CMD_USE_PILL} [丹药名称]\n"
-                f"💡 例如：{CMD_USE_PILL} 炼气丹"
+                f"💡 使用方法：{CMD_USE_PILL} [丹药名称] [数量]\n"
+                f"💡 例如：{CMD_USE_PILL} 炼气丹\n"
+                f"💡 批量：{CMD_USE_PILL} 凝气丹 15"
             )
             return
 
         pill_name = pill_name.strip()
 
+        # 解析丹药名称和数量
+        parts = pill_name.split()
+        count = 1
+
+        if len(parts) >= 2:
+            # 尝试解析最后一个参数为数量
+            try:
+                count = int(parts[-1])
+                if count <= 0:
+                    yield event.plain_result("❌ 数量必须大于0！")
+                    return
+                # 如果成功解析，则丹药名是前面的部分
+                pill_name = " ".join(parts[:-1])
+            except ValueError:
+                # 如果解析失败，说明没有指定数量，整个都是丹药名
+                pill_name = " ".join(parts)
+                count = 1
+
         # 先更新临时效果（移除过期的）
         await self.pill_manager.update_temporary_effects(player)
 
-        # 使用丹药
-        success, message = await self.pill_manager.use_pill(player, pill_name)
+        # 使用丹药（支持批量）
+        success, message = await self.pill_manager.use_pill(player, pill_name, count)
 
         if success:
             yield event.plain_result(message)
