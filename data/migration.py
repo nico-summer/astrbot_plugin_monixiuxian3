@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 25  # v25: 秘境每日次数限制
+LATEST_DB_VERSION = 26  # v26: 师徒系统
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -38,6 +38,34 @@ async def _migrate_to_v25(conn: aiosqlite.Connection, config_manager: ConfigMana
     await conn.execute("ALTER TABLE players ADD COLUMN rift_daily_count TEXT NOT NULL DEFAULT '{}'")
     await conn.execute("ALTER TABLE players ADD COLUMN rift_count_reset_date TEXT NOT NULL DEFAULT ''")
     logger.info("v25迁移完成：秘境每日次数限制")
+
+@migration(26)
+async def _migrate_to_v26(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v26 - 添加师徒系统"""
+    logger.info("开始迁移到v26：添加师徒系统")
+
+    # 创建师徒关系表
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS mentorship (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mentor_id TEXT NOT NULL,
+            apprentice_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            start_time INTEGER NOT NULL,
+            graduation_time INTEGER DEFAULT 0,
+            last_initiation_time INTEGER NOT NULL DEFAULT 0,
+            total_mentor_rewards INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (mentor_id) REFERENCES players(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (apprentice_id) REFERENCES players(user_id) ON DELETE CASCADE,
+            UNIQUE(apprentice_id, status)
+        )
+    """)
+
+    # 创建索引
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_mentorship_mentor ON mentorship(mentor_id, status)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_mentorship_apprentice ON mentorship(apprentice_id, status)")
+
+    logger.info("v26迁移完成：师徒系统")
 
 class MigrationManager:
     """数据库迁移管理器"""

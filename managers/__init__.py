@@ -16,6 +16,7 @@ from .blessed_land_manager import BlessedLandManager
 from .spirit_farm_manager import SpiritFarmManager
 from .dual_cultivation_manager import DualCultivationManager
 from .spirit_eye_manager import SpiritEyeManager
+from .mentorship_manager import MentorshipManager
 
 __all__ = [
     "CombatManager",
@@ -34,5 +35,6 @@ __all__ = [
     "BlessedLandManager",
     "SpiritFarmManager",
     "DualCultivationManager",
-    "SpiritEyeManager"
+    "SpiritEyeManager",
+    "MentorshipManager"
 ]

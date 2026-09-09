@@ -25,6 +25,7 @@ from .blessed_land_handlers import BlessedLandHandlers
 from .spirit_farm_handlers import SpiritFarmHandlers
 from .dual_cultivation_handlers import DualCultivationHandlers
 from .spirit_eye_handlers import SpiritEyeHandlers
+from .mentorship_handlers import MentorshipHandlers
 
 __all__ = [
     "PlayerHandler",
@@ -50,5 +51,6 @@ __all__ = [
     "BlessedLandHandlers",
     "SpiritFarmHandlers",
     "DualCultivationHandlers",
-    "SpiritEyeHandlers"
+    "SpiritEyeHandlers",
+    "MentorshipHandlers"
 ]

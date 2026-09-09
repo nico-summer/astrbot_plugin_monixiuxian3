@@ -244,6 +244,17 @@ class AdventureManager:
         player.experience += rewards["exp"]
         player.gold += rewards["gold"]
         await self.db.update_player(player)
+
+        # 师徒系统：给予师父传道奖励
+        from ..managers.mentorship_manager import MentorshipManager
+        from ..config_manager import ConfigManager
+        try:
+            config_manager = ConfigManager(self.db.db_path.parent.parent)
+            mentorship_mgr = MentorshipManager(self.db, config_manager)
+            await mentorship_mgr.grant_mentor_reward(player, rewards["exp"], rewards["gold"])
+        except:
+            pass  # 师徒系统异常不影响历练结算
+
         await self.db.ext.set_user_free(user_id)
 
         fatigue = route.get("fatigue_cooldown", 0)

@@ -8,18 +8,20 @@ from astrbot.api.event import AstrMessageEvent, filter
 from .data import DataBase, MigrationManager
 from .config_manager import ConfigManager
 from .handlers import (
-    MiscHandler, PlayerHandler, EquipmentHandler, BreakthroughHandler, 
+    MiscHandler, PlayerHandler, EquipmentHandler, BreakthroughHandler,
     PillHandler, ShopHandler, StorageRingHandler,
     SectHandlers, BossHandlers, CombatHandlers, RankingHandlers,
     RiftHandlers, AdventureHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
-    BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers
+    BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
+    MentorshipHandlers
 )
 from .managers import (
-    CombatManager, SectManager, BossManager, RiftManager, 
+    CombatManager, SectManager, BossManager, RiftManager,
     RankingManager, AdventureManager, AlchemyManager, ImpartManager,
     BankManager, BountyManager, ImpartPkManager,
-    BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager
+    BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager,
+    MentorshipManager
 )
 
 
@@ -166,6 +168,14 @@ CMD_SPIRIT_EYE_CLAIM = "抢占灵眼"
 CMD_SPIRIT_EYE_COLLECT = "灵眼收取"
 CMD_SPIRIT_EYE_RELEASE = "释放灵眼"
 
+# Phase 5: 师徒系统
+CMD_BECOME_MENTOR = "收徒"
+CMD_BECOME_APPRENTICE = "拜师"
+CMD_MENTORSHIP_INFO = "师徒信息"
+CMD_INITIATION = "灌顶"
+CMD_EXPEL_APPRENTICE = "逐出师门"
+CMD_LEAVE_MENTOR = "离开师门"
+
 CMD_REBIRTH = "弃道重修"
 class XiuXianPlugin(Star):
     """修仙插件 - 文字修仙游戏"""
@@ -235,6 +245,10 @@ class XiuXianPlugin(Star):
         self.dual_cult_handlers = DualCultivationHandlers(self.db, self.dual_cult_mgr)
         self.spirit_eye_mgr = SpiritEyeManager(self.db)
         self.spirit_eye_handlers = SpiritEyeHandlers(self.db, self.spirit_eye_mgr)
+
+        # Phase 5: 师徒系统
+        self.mentorship_mgr = MentorshipManager(self.db, self.config_manager)
+        self.mentorship_handlers = MentorshipHandlers(self.db, self.mentorship_mgr, self.config_manager)
         
         self.boss_task = None # Boss生成任务
         self.loan_check_task = None # 贷款逾期检查任务
@@ -1456,4 +1470,41 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_spirit_eye_release(self, event: AstrMessageEvent):
         async for r in self.spirit_eye_handlers.handle_release(event):
+            yield r
+
+    # ===== Phase 5: 师徒系统 =====
+    @filter.command(CMD_BECOME_MENTOR, "收徒")
+    @require_whitelist
+    async def handle_become_mentor(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.mentorship_handlers.handle_become_mentor(event, target):
+            yield r
+
+    @filter.command(CMD_BECOME_APPRENTICE, "拜师")
+    @require_whitelist
+    async def handle_become_apprentice(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.mentorship_handlers.handle_become_apprentice(event, target):
+            yield r
+
+    @filter.command(CMD_MENTORSHIP_INFO, "查看师徒信息")
+    @require_whitelist
+    async def handle_mentorship_info(self, event: AstrMessageEvent):
+        async for r in self.mentorship_handlers.handle_mentorship_info(event):
+            yield r
+
+    @filter.command(CMD_INITIATION, "灌顶")
+    @require_whitelist
+    async def handle_initiation(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.mentorship_handlers.handle_initiation(event, target):
+            yield r
+
+    @filter.command(CMD_EXPEL_APPRENTICE, "逐出师门")
+    @require_whitelist
+    async def handle_expel_apprentice(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.mentorship_handlers.handle_expel(event, target):
+            yield r
+
+    @filter.command(CMD_LEAVE_MENTOR, "离开师门")
+    @require_whitelist
+    async def handle_leave_mentor(self, event: AstrMessageEvent):
+        async for r in self.mentorship_handlers.handle_leave_mentor(event):
             yield r
