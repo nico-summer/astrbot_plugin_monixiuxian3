@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 26  # v26: 师徒系统
+LATEST_DB_VERSION = 28  # v28: 组队秘境系统
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -66,6 +66,53 @@ async def _migrate_to_v26(conn: aiosqlite.Connection, config_manager: ConfigMana
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_mentorship_apprentice ON mentorship(apprentice_id, status)")
 
     logger.info("v26迁移完成：师徒系统")
+
+@migration(27)
+async def _migrate_to_v27(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v27 - 宗门福利升级系统"""
+    logger.info("开始迁移到v27：宗门福利升级系统")
+
+    # 创建宗门功法库表
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS sect_technique_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sect_id INTEGER NOT NULL,
+            technique_name TEXT NOT NULL,
+            donator_id TEXT NOT NULL,
+            donate_time INTEGER NOT NULL,
+            borrow_count INTEGER DEFAULT 0,
+            FOREIGN KEY (sect_id) REFERENCES sects(sect_id) ON DELETE CASCADE
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_technique_library_sect ON sect_technique_library(sect_id)")
+
+    # 创建宗门功法借用表
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS sect_technique_borrow (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sect_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            technique_name TEXT NOT NULL,
+            borrow_time INTEGER NOT NULL,
+            return_time INTEGER NOT NULL,
+            FOREIGN KEY (sect_id) REFERENCES sects(sect_id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_technique_borrow_user ON sect_technique_borrow(user_id)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_technique_borrow_return ON sect_technique_borrow(return_time)")
+
+    # 创建宗门每日任务表
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS sect_daily_tasks (
+            user_id TEXT PRIMARY KEY,
+            task_date TEXT NOT NULL,
+            tasks_completed TEXT NOT NULL DEFAULT '{}',
+            FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+        )
+    """)
+
+    logger.info("v27迁移完成：宗门福利升级系统")
 
 class MigrationManager:
     """数据库迁移管理器"""
@@ -1206,3 +1253,75 @@ async def _migrate_to_v22(conn: aiosqlite.Connection, config_manager: ConfigMana
             ],
         )
     logger.info("已补齐洞天福地、灵田、双修和天地灵眼数据表")
+
+@migration(28)
+async def _migrate_to_v28(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v28 - 组队秘境系统"""
+    logger.info("开始迁移到v28：组队秘境系统")
+
+    # 创建队伍表
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS teams (
+            team_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            leader_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'waiting',
+            create_time INTEGER NOT NULL,
+            rift_id INTEGER DEFAULT NULL,
+            FOREIGN KEY (leader_id) REFERENCES players(user_id) ON DELETE CASCADE
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_teams_leader ON teams(leader_id)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_teams_status ON teams(status)")
+
+    # 创建队员表
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS team_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            join_time INTEGER NOT NULL,
+            FOREIGN KEY (team_id) REFERENCES teams(team_id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE,
+            UNIQUE(team_id, user_id)
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id)")
+
+    # 创建队伍邀请表
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS team_invitations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER NOT NULL,
+            inviter_id TEXT NOT NULL,
+            invitee_id TEXT NOT NULL,
+            invite_time INTEGER NOT NULL,
+            expire_time INTEGER NOT NULL,
+            FOREIGN KEY (team_id) REFERENCES teams(team_id) ON DELETE CASCADE,
+            FOREIGN KEY (inviter_id) REFERENCES players(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (invitee_id) REFERENCES players(user_id) ON DELETE CASCADE
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_team_inv_team ON team_invitations(team_id)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_team_inv_invitee ON team_invitations(invitee_id)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_team_inv_expire ON team_invitations(expire_time)")
+
+    # 创建队伍掉落表
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS team_loot (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER NOT NULL,
+            item_name TEXT NOT NULL,
+            item_type TEXT NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            assigned_to TEXT DEFAULT NULL,
+            assigned_time INTEGER DEFAULT NULL,
+            FOREIGN KEY (team_id) REFERENCES teams(team_id) ON DELETE CASCADE,
+            FOREIGN KEY (assigned_to) REFERENCES players(user_id) ON DELETE SET NULL
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_team_loot_team ON team_loot(team_id)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_team_loot_assigned ON team_loot(assigned_to)")
+
+    await conn.commit()
+    logger.info("v28迁移完成：组队秘境系统")

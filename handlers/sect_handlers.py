@@ -138,3 +138,37 @@ class SectHandlers:
         user_id = event.get_sender_id()
         success, msg = await self.sect_mgr.perform_sect_task(user_id)
         yield event.plain_result(msg)
+
+    async def handle_technique_library(self, event: AstrMessageEvent):
+        """查看宗门功法库"""
+        user_id = event.get_sender_id()
+        success, msg = await self.sect_mgr.get_technique_library(user_id)
+        yield event.plain_result(msg)
+
+    async def handle_donate_technique(self, event: AstrMessageEvent, technique_name: str):
+        """捐献功法到宗门"""
+        user_id = event.get_sender_id()
+        user_cd = await self.db.ext.get_user_cd(user_id)
+        if user_cd and user_cd.type != UserStatus.IDLE:
+            current_status = UserStatus.get_name(user_cd.type)
+            yield event.plain_result(f"❌ 你当前正{current_status}，无法进行此操作！")
+            return
+        success, msg = await self.sect_mgr.donate_technique(user_id, technique_name)
+        yield event.plain_result(msg)
+
+    async def handle_borrow_technique(self, event: AstrMessageEvent, technique_name: str):
+        """借用宗门功法"""
+        user_id = event.get_sender_id()
+        user_cd = await self.db.ext.get_user_cd(user_id)
+        if user_cd and user_cd.type != UserStatus.IDLE:
+            current_status = UserStatus.get_name(user_cd.type)
+            yield event.plain_result(f"❌ 你当前正{current_status}，无法进行此操作！")
+            return
+        success, msg = await self.sect_mgr.borrow_technique(user_id, technique_name)
+        yield event.plain_result(msg)
+
+    async def handle_sect_tasks(self, event: AstrMessageEvent):
+        """查看宗门每日任务"""
+        user_id = event.get_sender_id()
+        success, msg, _ = await self.sect_mgr.get_daily_tasks(user_id)
+        yield event.plain_result(msg)

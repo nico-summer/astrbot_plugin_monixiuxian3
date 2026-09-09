@@ -521,21 +521,368 @@ class SectManager:
         members = await self.db.ext.get_sect_members(sect_id)
         # 过滤掉死亡的宗主
         remaining = [m for m in members if m.user_id != dead_owner_id]
-        
+
         if not remaining:
             # 无其他成员，解散宗门
             await self.db.ext.delete_sect(sect_id)
             return True, "宗门已解散"
-        
+
         # 按职位和贡献排序，选择新宗主
         remaining.sort(key=lambda m: (m.sect_position, -m.sect_contribution))
         new_owner = remaining[0]
-        
+
         # 更新宗门宗主
         sect = await self.db.ext.get_sect_by_id(sect_id)
         if sect:
             sect.sect_owner = new_owner.user_id
             await self.db.ext.update_sect(sect)
             await self.db.ext.update_player_sect_info(new_owner.user_id, sect_id, 0)
-        
+
         return True, f"宗主之位已传给{new_owner.user_name or new_owner.user_id}"
+
+    def get_cultivation_bonus(self, sect_scale: int) -> float:
+        """
+        根据宗门建设度获取修炼加成
+
+        Args:
+            sect_scale: 宗门建设度
+
+        Returns:
+            修炼加成百分比（如 0.05 表示 5%）
+        """
+        if sect_scale >= 100001:
+            return 0.30  # 超级宗门 +30%
+        elif sect_scale >= 50001:
+            return 0.20  # 顶级宗门 +20%
+        elif sect_scale >= 20001:
+            return 0.15  # 高级宗门 +15%
+        elif sect_scale >= 5001:
+            return 0.10  # 中级宗门 +10%
+        elif sect_scale >= 1:
+            return 0.05  # 初级宗门 +5%
+        else:
+            return 0.0   # 无宗门
+
+    async def donate_technique(self, user_id: str, technique_name: str) -> Tuple[bool, str]:
+        """
+        捐献功法到宗门
+
+        Args:
+            user_id: 用户ID
+            technique_name: 功法名称
+
+        Returns:
+            (成功标志, 消息)
+        """
+        player = await self.db.get_player_by_id(user_id)
+        if not player or player.sect_id == 0:
+            return False, "❌ 你还未加入宗门！"
+
+        # 检查职位权限（只有宗主和长老可以捐献）
+        if player.sect_position not in [0, 1]:
+            return False, "❌ 只有宗主和长老才能捐献功法！"
+
+        # 检查是否拥有该功法
+        techniques = player.get_techniques()
+        if technique_name not in techniques and player.main_technique != technique_name:
+            return False, f"❌ 你没有功法【{technique_name}】！"
+
+        # 检查功法是否已在功法库中
+        cursor = await self.db.conn.execute(
+            "SELECT id FROM sect_technique_library WHERE sect_id = ? AND technique_name = ?",
+            (player.sect_id, technique_name)
+        )
+        existing = await cursor.fetchone()
+        if existing:
+            return False, f"❌ 功法【{technique_name}】已在宗门功法库中！"
+
+        # 添加到功法库
+        await self.db.conn.execute(
+            "INSERT INTO sect_technique_library (sect_id, technique_name, donator_id, donate_time, borrow_count) VALUES (?, ?, ?, ?, 0)",
+            (player.sect_id, technique_name, user_id, int(time.time()))
+        )
+        await self.db.conn.commit()
+
+        # 奖励贡献度
+        contribution_reward = 100
+        player.sect_contribution += contribution_reward
+        await self.db.update_player(player)
+
+        return True, f"✨ 成功捐献功法【{technique_name}】到宗门！\n获得宗门贡献度：+{contribution_reward}\n💡 功法不会从你身上消失，其他成员可以借用。"
+
+    async def borrow_technique(self, user_id: str, technique_name: str) -> Tuple[bool, str]:
+        """
+        借用宗门功法
+
+        Args:
+            user_id: 用户ID
+            technique_name: 功法名称
+
+        Returns:
+            (成功标志, 消息)
+        """
+        player = await self.db.get_player_by_id(user_id)
+        if not player or player.sect_id == 0:
+            return False, "❌ 你还未加入宗门！"
+
+        # 检查功法库中是否有该功法
+        cursor = await self.db.conn.execute(
+            "SELECT id FROM sect_technique_library WHERE sect_id = ? AND technique_name = ?",
+            (player.sect_id, technique_name)
+        )
+        library_record = await cursor.fetchone()
+        if not library_record:
+            return False, f"❌ 宗门功法库中没有功法【{technique_name}】！"
+
+        # 检查是否已拥有该功法
+        techniques = player.get_techniques()
+        if technique_name in techniques or player.main_technique == technique_name:
+            return False, f"❌ 你已经拥有功法【{technique_name}】！"
+
+        # 检查当前借用数量（最多2个）
+        cursor = await self.db.conn.execute(
+            "SELECT COUNT(*) FROM sect_technique_borrow WHERE user_id = ? AND return_time > ?",
+            (user_id, int(time.time()))
+        )
+        current_borrow_count = (await cursor.fetchone())[0]
+        if current_borrow_count >= 2:
+            return False, "❌ 你已借用2个功法，无法继续借用！请等待归还后再借。"
+
+        # 检查是否已借用该功法
+        cursor = await self.db.conn.execute(
+            "SELECT id FROM sect_technique_borrow WHERE user_id = ? AND technique_name = ? AND return_time > ?",
+            (user_id, technique_name, int(time.time()))
+        )
+        if await cursor.fetchone():
+            return False, f"❌ 你已借用功法【{technique_name}】！"
+
+        # 创建借用记录（7天期限）
+        borrow_time = int(time.time())
+        return_time = borrow_time + 7 * 24 * 3600  # 7天后
+        await self.db.conn.execute(
+            "INSERT INTO sect_technique_borrow (sect_id, user_id, technique_name, borrow_time, return_time) VALUES (?, ?, ?, ?, ?)",
+            (player.sect_id, user_id, technique_name, borrow_time, return_time)
+        )
+
+        # 更新借用次数
+        await self.db.conn.execute(
+            "UPDATE sect_technique_library SET borrow_count = borrow_count + 1 WHERE sect_id = ? AND technique_name = ?",
+            (player.sect_id, technique_name)
+        )
+
+        # 将功法添加到玩家身上（自动装备）
+        if not player.main_technique:
+            player.main_technique = technique_name
+        else:
+            techniques.append(technique_name)
+            player.set_techniques(techniques)
+
+        await self.db.conn.commit()
+        await self.db.update_player(player)
+
+        from datetime import datetime
+        return_date = datetime.fromtimestamp(return_time).strftime("%Y-%m-%d %H:%M")
+
+        return True, f"✨ 成功借用功法【{technique_name}】！\n⏰ 归还时间：{return_date}\n💡 到期后功法将自动归还。"
+
+    async def get_technique_library(self, user_id: str) -> Tuple[bool, str]:
+        """
+        获取宗门功法库列表
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            (成功标志, 消息)
+        """
+        player = await self.db.get_player_by_id(user_id)
+        if not player or player.sect_id == 0:
+            return False, "❌ 你还未加入宗门！"
+
+        # 获取功法库列表
+        cursor = await self.db.conn.execute(
+            "SELECT technique_name, donator_id, borrow_count FROM sect_technique_library WHERE sect_id = ?",
+            (player.sect_id,)
+        )
+        techniques = await cursor.fetchall()
+
+        if not techniques:
+            return False, "❌ 宗门功法库为空！\n💡 宗主和长老可使用「捐献功法 <功法名>」捐献功法。"
+
+        msg = "📜 宗门功法库\n"
+        msg += "━━━━━━━━━━━━━━━\n"
+
+        for idx, (tech_name, donator_id, borrow_count) in enumerate(techniques, 1):
+            donator = await self.db.get_player_by_id(donator_id)
+            donator_name = donator.user_name if donator and donator.user_name else donator_id
+            msg += f"{idx}. 【{tech_name}】\n"
+            msg += f"   捐献者：{donator_name}\n"
+            msg += f"   借用次数：{borrow_count}\n\n"
+
+        msg += "💡 使用「借用功法 <功法名>」借用功法（7天期限）"
+
+        return True, msg
+
+    async def check_borrowed_techniques(self, user_id: str) -> Tuple[bool, List[str]]:
+        """
+        检查并归还过期的借用功法
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            (有过期功法, 归还的功法列表)
+        """
+        current_time = int(time.time())
+
+        # 查找过期的借用记录
+        cursor = await self.db.conn.execute(
+            "SELECT id, technique_name FROM sect_technique_borrow WHERE user_id = ? AND return_time <= ?",
+            (user_id, current_time)
+        )
+        expired_borrows = await cursor.fetchall()
+
+        if not expired_borrows:
+            return False, []
+
+        returned_techniques = []
+        player = await self.db.get_player_by_id(user_id)
+        if not player:
+            return False, []
+
+        techniques = player.get_techniques()
+
+        for borrow_id, technique_name in expired_borrows:
+            # 从玩家身上移除功法
+            if player.main_technique == technique_name:
+                player.main_technique = ""
+            elif technique_name in techniques:
+                techniques.remove(technique_name)
+
+            # 删除借用记录
+            await self.db.conn.execute(
+                "DELETE FROM sect_technique_borrow WHERE id = ?",
+                (borrow_id,)
+            )
+
+            returned_techniques.append(technique_name)
+
+        if returned_techniques:
+            player.set_techniques(techniques)
+            await self.db.update_player(player)
+            await self.db.conn.commit()
+
+        return True, returned_techniques
+
+    async def get_daily_tasks(self, user_id: str) -> Tuple[bool, str, Dict]:
+        """
+        获取宗门每日任务
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            (成功标志, 消息, 任务数据)
+        """
+        player = await self.db.get_player_by_id(user_id)
+        if not player or player.sect_id == 0:
+            return False, "❌ 你还未加入宗门！", {}
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # 获取今日任务记录
+        cursor = await self.db.conn.execute(
+            "SELECT tasks_completed FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
+            (user_id, today)
+        )
+        row = await cursor.fetchone()
+
+        if row:
+            import json
+            tasks_completed = json.loads(row[0])
+        else:
+            tasks_completed = {}
+
+        # 定义任务列表
+        all_tasks = {
+            "donate_stone": {"name": "捐献灵石", "desc": "捐献1000灵石", "reward": 50, "completed": tasks_completed.get("donate_stone", False)},
+            "adventure": {"name": "完成历练", "desc": "完成任意历练", "reward": 30, "completed": tasks_completed.get("adventure", False)},
+            "farm_harvest": {"name": "种植灵草", "desc": "收获灵田", "reward": 20, "completed": tasks_completed.get("farm_harvest", False)},
+            "rift_explore": {"name": "探索秘境", "desc": "完成秘境探索", "reward": 40, "completed": tasks_completed.get("rift_explore", False)},
+        }
+
+        msg = "📋 宗门每日任务\n"
+        msg += "━━━━━━━━━━━━━━━\n"
+
+        total_contribution = 0
+        for task_id, task_info in all_tasks.items():
+            status = "✅" if task_info["completed"] else "⭕"
+            msg += f"{status} {task_info['name']}\n"
+            msg += f"   要求：{task_info['desc']}\n"
+            msg += f"   奖励：+{task_info['reward']} 贡献度\n\n"
+            if task_info["completed"]:
+                total_contribution += task_info["reward"]
+
+        msg += f"今日已获得贡献度：{total_contribution}\n"
+        msg += "💡 任务自动检测完成"
+
+        return True, msg, all_tasks
+
+    async def complete_daily_task(self, user_id: str, task_type: str) -> Tuple[bool, int]:
+        """
+        完成宗门每日任务
+
+        Args:
+            user_id: 用户ID
+            task_type: 任务类型（donate_stone/adventure/farm_harvest/rift_explore）
+
+        Returns:
+            (成功标志, 获得的贡献度)
+        """
+        player = await self.db.get_player_by_id(user_id)
+        if not player or player.sect_id == 0:
+            return False, 0
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # 获取今日任务记录
+        cursor = await self.db.conn.execute(
+            "SELECT tasks_completed FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
+            (user_id, today)
+        )
+        row = await cursor.fetchone()
+
+        import json
+        if row:
+            tasks_completed = json.loads(row[0])
+        else:
+            tasks_completed = {}
+
+        # 检查是否已完成
+        if tasks_completed.get(task_type, False):
+            return False, 0
+
+        # 标记为已完成
+        tasks_completed[task_type] = True
+
+        # 更新或插入记录
+        await self.db.conn.execute(
+            "INSERT OR REPLACE INTO sect_daily_tasks (user_id, task_date, tasks_completed) VALUES (?, ?, ?)",
+            (user_id, today, json.dumps(tasks_completed))
+        )
+        await self.db.conn.commit()
+
+        # 奖励贡献度
+        task_rewards = {
+            "donate_stone": 50,
+            "adventure": 30,
+            "farm_harvest": 20,
+            "rift_explore": 40,
+        }
+
+        contribution = task_rewards.get(task_type, 0)
+        if contribution > 0:
+            player.sect_contribution += contribution
+            await self.db.update_player(player)
+
+        return True, contribution

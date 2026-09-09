@@ -35,3 +35,9 @@ class RiftHandlers:
         user_id = event.get_sender_id()
         success, msg = await self.rift_mgr.exit_rift(user_id)
         yield event.plain_result(msg)
+
+    async def handle_sect_rift(self, event: AstrMessageEvent, level: int):
+        """进入宗门秘境"""
+        user_id = event.get_sender_id()
+        success, msg = await self.rift_mgr.enter_sect_rift(user_id, level)
+        yield event.plain_result(msg)

@@ -236,6 +236,16 @@ class PlayerHandler:
             f"  宗门职位：{position_name}\n"
         )
 
+        # 显示宗门修炼加成
+        if player.sect_id != 0:
+            from ..managers.sect_manager import SectManager
+            sect_manager = SectManager(self.db, self.config_manager)
+            sect = await self.db.ext.get_sect_by_id(player.sect_id)
+            if sect:
+                sect_bonus = sect_manager.get_cultivation_bonus(sect.sect_scale)
+                if sect_bonus > 0:
+                    reply_msg += f"  修炼加成：+{int(sect_bonus * 100)}%\n"
+
         permanent_buff_lines = self.pill_manager.get_permanent_buff_lines(player)
         temporary_buff_lines = self.pill_manager.get_temporary_buff_lines(player)
         reply_msg += "\n【丹药 Buff】\n"
@@ -399,6 +409,20 @@ class PlayerHandler:
             pill_multipliers
         )
 
+        # 获取宗门修炼加成
+        sect_bonus = 0.0
+        sect_bonus_msg = ""
+        if player.sect_id != 0:
+            from ..managers.sect_manager import SectManager
+            sect_manager = SectManager(self.db, self.config_manager)
+            sect = await self.db.ext.get_sect_by_id(player.sect_id)
+            if sect:
+                sect_bonus = sect_manager.get_cultivation_bonus(sect.sect_scale)
+                if sect_bonus > 0:
+                    sect_bonus_exp = int(gained_exp * sect_bonus)
+                    gained_exp += sect_bonus_exp
+                    sect_bonus_msg = f"\n🏛️ 宗门加成：+{int(sect_bonus * 100)}%（+{sect_bonus_exp:,}修为）"
+
         # 更新玩家数据
         player.experience += gained_exp
         player.state = "空闲"
@@ -429,7 +453,7 @@ class PlayerHandler:
             "🌟 道友出关成功！\n"
             "━━━━━━━━━━━━━━━\n"
             f"⏱️ 闭关时长：{time_str}\n"
-            f"📈 获得修为：{gained_exp:,}{exceed_msg}\n"
+            f"📈 获得修为：{gained_exp:,}{exceed_msg}{sect_bonus_msg}\n"
             f"💫 当前修为：{player.experience:,}{recovery_msg}{debuff_msg}\n"
             "━━━━━━━━━━━━━━━\n"
             "道友已回归红尘，可继续修行。"

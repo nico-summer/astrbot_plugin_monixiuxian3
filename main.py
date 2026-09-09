@@ -14,14 +14,14 @@ from .handlers import (
     RiftHandlers, AdventureHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
     BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
-    MentorshipHandlers
+    MentorshipHandlers, TeamHandlers
 )
 from .managers import (
     CombatManager, SectManager, BossManager, RiftManager,
     RankingManager, AdventureManager, AlchemyManager, ImpartManager,
     BankManager, BountyManager, ImpartPkManager,
     BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager,
-    MentorshipManager
+    MentorshipManager, TeamManager
 )
 
 
@@ -80,6 +80,11 @@ CMD_SECT_KICK = "踢出成员"
 CMD_SECT_TRANSFER = "宗主传位"
 CMD_SECT_TASK = "宗门任务"
 CMD_SECT_POSITION = "职位变更"
+CMD_SECT_TECHNIQUE_LIB = "宗门功法库"
+CMD_DONATE_TECHNIQUE = "捐献功法"
+CMD_BORROW_TECHNIQUE = "借用功法"
+CMD_SECT_TASKS = "宗门任务"
+CMD_SECT_RIFT = "宗门秘境"
 
 # Boss系统指令
 CMD_BOSS_INFO = "世界boss"
@@ -176,6 +181,20 @@ CMD_INITIATION = "灌顶"
 CMD_EXPEL_APPRENTICE = "逐出师门"
 CMD_LEAVE_MENTOR = "离开师门"
 
+# 组队系统
+CMD_CREATE_TEAM = "创建队伍"
+CMD_INVITE_TEAM = "邀请入队"
+CMD_ACCEPT_TEAM = "接受组队"
+CMD_REJECT_TEAM = "拒绝组队"
+CMD_TEAM_INFO = "队伍信息"
+CMD_LEAVE_TEAM = "离开队伍"
+CMD_KICK_TEAM = "踢出队伍"
+CMD_DISBAND_TEAM = "解散队伍"
+CMD_TEAM_EXPLORE = "组队探索"
+CMD_TEAM_COMPLETE = "完成组队"
+CMD_TEAM_LOOT = "队伍掉落"
+CMD_ASSIGN_LOOT = "分配物品"
+
 CMD_REBIRTH = "弃道重修"
 class XiuXianPlugin(Star):
     """修仙插件 - 文字修仙游戏"""
@@ -249,7 +268,11 @@ class XiuXianPlugin(Star):
         # Phase 5: 师徒系统
         self.mentorship_mgr = MentorshipManager(self.db, self.config_manager)
         self.mentorship_handlers = MentorshipHandlers(self.db, self.mentorship_mgr, self.config_manager)
-        
+
+        # 组队系统
+        self.team_mgr = TeamManager(self.db)
+        self.team_handlers = TeamHandlers(self.db, self.team_mgr, self.rift_mgr)
+
         self.boss_task = None # Boss生成任务
         self.loan_check_task = None # 贷款逾期检查任务
         self.spirit_eye_task = None # 灵眼生成任务
@@ -333,8 +356,8 @@ class XiuXianPlugin(Star):
         # 检查是否已有秘境数据
         existing_rifts = await self.db.ext.get_all_rifts()
 
-        # 如果秘境数量已经达到15个，跳过初始化
-        if existing_rifts and len(existing_rifts) >= 15:
+        # 如果秘境数量已经达到18个，跳过初始化
+        if existing_rifts and len(existing_rifts) >= 18:
             logger.info(f"【秘境系统】已有 {len(existing_rifts)} 个秘境，跳过初始化")
             return
 
@@ -467,6 +490,31 @@ class XiuXianPlugin(Star):
                 "required_level": 32,
                 "rewards": '{"exp":[15000000,40000000],"gold":[8000000,20000000]}',
                 "description": "天仙征战诸天的无上战场"
+            },
+            # === 组队专属秘境（3个）===
+            {
+                "rift_id": 16,
+                "rift_name": "修罗战场",
+                "rift_level": 4,
+                "required_level": 16,
+                "rewards": '{"exp":[100000,300000],"gold":[50000,150000]}',
+                "description": "元婴期推荐，2-4人组队秘境，掉落更稀有的装备和材料"
+            },
+            {
+                "rift_id": 17,
+                "rift_name": "九幽深渊",
+                "rift_level": 5,
+                "required_level": 22,
+                "rewards": '{"exp":[500000,1500000],"gold":[250000,750000]}',
+                "description": "化神期推荐，3-4人组队秘境，掉落传说装备和神器"
+            },
+            {
+                "rift_id": 18,
+                "rift_name": "天道试炼",
+                "rift_level": 6,
+                "required_level": 28,
+                "rewards": '{"exp":[2000000,6000000],"gold":[1000000,3000000]}',
+                "description": "炼虚期推荐，4人满编秘境，掉落神器装备和至尊功法"
             },
         ]
 
@@ -1083,6 +1131,50 @@ class XiuXianPlugin(Star):
         async for r in self.sect_handlers.handle_position_change(event, target, position):
             yield r
 
+    @filter.command(CMD_SECT_TECHNIQUE_LIB, "查看宗门功法库")
+    @require_whitelist
+    async def handle_sect_technique_lib(self, event: AstrMessageEvent):
+        async for r in self.sect_handlers.handle_technique_library(event):
+            yield r
+
+    @filter.command(CMD_DONATE_TECHNIQUE, "捐献功法到宗门")
+    @require_whitelist
+    async def handle_donate_technique(self, event: AstrMessageEvent, technique_name: str = ""):
+        if not technique_name:
+            yield event.plain_result(f"请输入功法名称，例如：/{CMD_DONATE_TECHNIQUE} 九天玄雷诀")
+            return
+        async for r in self.sect_handlers.handle_donate_technique(event, technique_name):
+            yield r
+
+    @filter.command(CMD_BORROW_TECHNIQUE, "借用宗门功法")
+    @require_whitelist
+    async def handle_borrow_technique(self, event: AstrMessageEvent, technique_name: str = ""):
+        if not technique_name:
+            yield event.plain_result(f"请输入功法名称，例如：/{CMD_BORROW_TECHNIQUE} 九天玄雷诀")
+            return
+        async for r in self.sect_handlers.handle_borrow_technique(event, technique_name):
+            yield r
+
+    @filter.command(CMD_SECT_TASKS, "查看宗门每日任务")
+    @require_whitelist
+    async def handle_sect_tasks(self, event: AstrMessageEvent):
+        async for r in self.sect_handlers.handle_sect_tasks(event):
+            yield r
+
+    @filter.command(CMD_SECT_RIFT, "进入宗门秘境")
+    @require_whitelist
+    async def handle_sect_rift(self, event: AstrMessageEvent, level: int = 0):
+        if level not in [1, 2, 3]:
+            yield event.plain_result(
+                f"请选择宗门秘境等级（1-3），例如：/{CMD_SECT_RIFT} 1\n"
+                f"1 - 宗门试炼地（建设度10000+）\n"
+                f"2 - 宗门秘藏（建设度30000+）\n"
+                f"3 - 宗门禁地（建设度60000+）"
+            )
+            return
+        async for r in self.rift_handlers.handle_sect_rift(event, level):
+            yield r
+
     # ===== Boss系统指令 =====
 
     @filter.command(CMD_BOSS_INFO, "查看世界Boss状态")
@@ -1507,4 +1599,78 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_leave_mentor(self, event: AstrMessageEvent):
         async for r in self.mentorship_handlers.handle_leave_mentor(event):
+            yield r
+
+    # ===== 组队系统指令 =====
+
+    @filter.command(CMD_CREATE_TEAM, "创建队伍")
+    @require_whitelist
+    async def handle_create_team(self, event: AstrMessageEvent):
+        async for r in self.team_handlers.handle_create_team(event):
+            yield r
+
+    @filter.command(CMD_INVITE_TEAM, "邀请玩家入队")
+    @require_whitelist
+    async def handle_invite_team(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.team_handlers.handle_invite_member(event, target):
+            yield r
+
+    @filter.command(CMD_ACCEPT_TEAM, "接受组队邀请")
+    @require_whitelist
+    async def handle_accept_team(self, event: AstrMessageEvent):
+        async for r in self.team_handlers.handle_accept_invitation(event):
+            yield r
+
+    @filter.command(CMD_REJECT_TEAM, "拒绝组队邀请")
+    @require_whitelist
+    async def handle_reject_team(self, event: AstrMessageEvent):
+        async for r in self.team_handlers.handle_reject_invitation(event):
+            yield r
+
+    @filter.command(CMD_TEAM_INFO, "查看队伍信息")
+    @require_whitelist
+    async def handle_team_info(self, event: AstrMessageEvent):
+        async for r in self.team_handlers.handle_team_info(event):
+            yield r
+
+    @filter.command(CMD_LEAVE_TEAM, "离开队伍")
+    @require_whitelist
+    async def handle_leave_team(self, event: AstrMessageEvent):
+        async for r in self.team_handlers.handle_leave_team(event):
+            yield r
+
+    @filter.command(CMD_KICK_TEAM, "踢出队员")
+    @require_whitelist
+    async def handle_kick_team(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.team_handlers.handle_kick_member(event, target):
+            yield r
+
+    @filter.command(CMD_DISBAND_TEAM, "解散队伍")
+    @require_whitelist
+    async def handle_disband_team(self, event: AstrMessageEvent):
+        async for r in self.team_handlers.handle_disband_team(event):
+            yield r
+
+    @filter.command(CMD_TEAM_EXPLORE, "组队探索秘境")
+    @require_whitelist
+    async def handle_team_explore(self, event: AstrMessageEvent, rift_id: int = 0):
+        async for r in self.team_handlers.handle_team_explore(event, rift_id):
+            yield r
+
+    @filter.command(CMD_TEAM_COMPLETE, "完成组队探索")
+    @require_whitelist
+    async def handle_team_complete(self, event: AstrMessageEvent):
+        async for r in self.team_handlers.handle_team_complete_explore(event):
+            yield r
+
+    @filter.command(CMD_TEAM_LOOT, "查看队伍掉落")
+    @require_whitelist
+    async def handle_team_loot(self, event: AstrMessageEvent):
+        async for r in self.team_handlers.handle_team_loot(event):
+            yield r
+
+    @filter.command(CMD_ASSIGN_LOOT, "分配物品给队员")
+    @require_whitelist
+    async def handle_assign_loot(self, event: AstrMessageEvent, loot_id: int = 0, target: str = ""):
+        async for r in self.team_handlers.handle_assign_loot(event, loot_id, target):
             yield r
