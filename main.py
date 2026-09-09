@@ -230,9 +230,9 @@ class XiuXianPlugin(Star):
         self.combat_mgr = CombatManager()
         self.sect_mgr = SectManager(self.db, self.config_manager)
         self.boss_mgr = BossManager(self.db, self.combat_mgr, self.config_manager, self.storage_ring_mgr, self.equipment_mgr)
-        self.rift_mgr = RiftManager(self.db, self.config_manager, self.storage_ring_mgr)
+        self.rift_mgr = RiftManager(self.db, self.config_manager, self.storage_ring_mgr, self.sect_mgr)
         self.rank_mgr = RankingManager(self.db, self.combat_mgr, self.config_manager)
-        self.adventure_mgr = AdventureManager(self.db, self.storage_ring_mgr)
+        self.adventure_mgr = AdventureManager(self.db, self.storage_ring_mgr, self.sect_mgr)
         self.alchemy_mgr = AlchemyManager(self.db, self.config_manager, self.storage_ring_mgr)
         self.impart_mgr = ImpartManager(self.db)
 
@@ -260,7 +260,7 @@ class XiuXianPlugin(Star):
         # Phase 4: 扩展功能
         self.blessed_land_mgr = BlessedLandManager(self.db)
         self.blessed_land_handlers = BlessedLandHandlers(self.db, self.blessed_land_mgr)
-        self.spirit_farm_mgr = SpiritFarmManager(self.db, self.storage_ring_mgr)
+        self.spirit_farm_mgr = SpiritFarmManager(self.db, self.storage_ring_mgr, self.sect_mgr)
         self.spirit_farm_handlers = SpiritFarmHandlers(self.db, self.spirit_farm_mgr)
         self.dual_cult_mgr = DualCultivationManager(self.db)
         self.dual_cult_handlers = DualCultivationHandlers(self.db, self.dual_cult_mgr)

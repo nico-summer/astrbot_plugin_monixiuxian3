@@ -13,6 +13,7 @@ from ..models import Player
 
 if TYPE_CHECKING:
     from ..core import StorageRingManager
+    from .sect_manager import SectManager
 
 
 class RiftManager:
@@ -291,10 +292,11 @@ class RiftManager:
         3: 10,  # 高级秘境 10%
     }
     
-    def __init__(self, db: DataBase, config_manager=None, storage_ring_manager: "StorageRingManager" = None):
+    def __init__(self, db: DataBase, config_manager=None, storage_ring_manager: "StorageRingManager" = None, sect_manager: "SectManager" = None):
         self.db = db
         self.config_manager = config_manager
         self.storage_ring_manager = storage_ring_manager
+        self.sect_manager = sect_manager
         self.config = config_manager.rift_config if config_manager else {}
         self.explore_duration = self.config.get("default_duration", self.DEFAULT_DURATION)
     
@@ -720,6 +722,13 @@ class RiftManager:
         # 10. 清除CD
         await self.db.ext.set_user_free(user_id)
 
+        # 11. 完成宗门每日任务
+        task_msg = ""
+        if player.sect_id != 0 and self.sect_manager:
+            success, contribution = await self.sect_manager.complete_daily_task(user_id, "rift_explore")
+            if success and contribution > 0:
+                task_msg = f"\n\n🎉 完成宗门每日任务「探索秘境」，获得 {contribution} 贡献度！"
+
         # 计算剩余次数
         remaining_msg = f"\n📋 今日剩余次数：{remaining}/{self.DAILY_RIFT_LIMIT}" if remaining > 0 else "\n⚠️ 今日探索次数已用尽"
 
@@ -730,7 +739,7 @@ class RiftManager:
 {event["desc"]}
 
 获得修为：+{exp_reward:,}
-获得灵石：+{gold_reward:,}{item_msg}{remaining_msg}
+获得灵石：+{gold_reward:,}{item_msg}{remaining_msg}{task_msg}
         """.strip()
         
         reward_data = {

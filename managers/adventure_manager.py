@@ -17,6 +17,7 @@ from ..models_extended import UserStatus
 
 if TYPE_CHECKING:
     from ..core import StorageRingManager
+    from .sect_manager import SectManager
 
 
 class AdventureManager:
@@ -90,9 +91,10 @@ class AdventureManager:
         }
     }
 
-    def __init__(self, db: DataBase, storage_ring_manager: "StorageRingManager" = None):
+    def __init__(self, db: DataBase, storage_ring_manager: "StorageRingManager" = None, sect_manager: "SectManager" = None):
         self.db = db
         self.storage_ring_manager = storage_ring_manager
+        self.sect_manager = sect_manager
         self._route_cooldowns: Dict[str, Dict[str, int]] = {}
         self.routes: Dict[str, dict] = {}
         self.route_alias_index: Dict[str, str] = {}
@@ -257,6 +259,13 @@ class AdventureManager:
 
         await self.db.ext.set_user_free(user_id)
 
+        # 完成宗门每日任务
+        task_msg = ""
+        if player.sect_id != 0 and self.sect_manager:
+            success, contribution = await self.sect_manager.complete_daily_task(user_id, "adventure")
+            if success and contribution > 0:
+                task_msg = f"\n🎉 完成宗门每日任务「完成历练」，获得 {contribution} 贡献度！"
+
         fatigue = route.get("fatigue_cooldown", 0)
         if event.get("injury"):
             # 受伤时增加额外休整时间
@@ -278,6 +287,7 @@ class AdventureManager:
             f"当前修为：{player.experience:,}\n"
             f"当前灵石：{player.gold:,}"
             f"{fatigue_hint}"
+            f"{task_msg}"
         )
 
         reward_data = {

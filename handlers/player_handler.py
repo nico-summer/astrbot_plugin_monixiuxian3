@@ -111,6 +111,14 @@ class PlayerHandler:
     @player_required
     async def handle_player_info(self, player: Player, event: AstrMessageEvent):
         """处理查看玩家信息 - 展示新属性"""
+        # 检查并归还过期的借用功法
+        if player.sect_id != 0:
+            has_expired, expired_list = await self.sect_mgr.check_borrowed_techniques(player.user_id)
+            if has_expired and expired_list:
+                yield event.plain_result(f"⏰ 你借用的功法已到期归还：{'、'.join(expired_list)}")
+                # 重新获取玩家数据
+                player = await self.db.get_player_by_id(player.user_id)
+
         display_name = event.get_sender_name()
         required_exp = player.get_required_exp(self.config_manager)
 
@@ -332,6 +340,14 @@ class PlayerHandler:
     @player_required
     async def handle_end_cultivation(self, player: Player, event: AstrMessageEvent):
         """处理出关指令"""
+        # 检查并归还过期的借用功法
+        if player.sect_id != 0:
+            has_expired, expired_list = await self.sect_mgr.check_borrowed_techniques(player.user_id)
+            if has_expired and expired_list:
+                yield event.plain_result(f"⏰ 你借用的功法已到期归还：{'、'.join(expired_list)}")
+                # 重新获取玩家数据
+                player = await self.db.get_player_by_id(player.user_id)
+
         # 检查是否在闭关中
         if player.state != "修炼中":
             yield event.plain_result("道友当前并未闭关，无需出关。")

@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 29  # v29: 拜师请求系统
+LATEST_DB_VERSION = 30  # v30: 宗门福利升级系统完善
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -1352,3 +1352,61 @@ async def _migrate_to_v29(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v29迁移完成：拜师请求系统")
+
+@migration(30)
+async def _migrate_to_v30(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v30 - 宗门福利升级系统完善"""
+    logger.info("开始迁移到v30：宗门福利升级系统完善")
+
+    # 为 sect_technique_borrow 表添加 is_active 字段
+    try:
+        await conn.execute("ALTER TABLE sect_technique_borrow ADD COLUMN is_active INTEGER DEFAULT 1")
+        logger.info("已为 sect_technique_borrow 表添加 is_active 字段")
+    except Exception as e:
+        logger.warning(f"添加 is_active 字段失败（可能已存在）: {e}")
+
+    # 创建新索引优化查询性能
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_technique_borrow_active ON sect_technique_borrow(user_id, is_active)")
+
+    # 更新 sect_daily_tasks 表结构 - 使用单独的字段而不是JSON
+    # 先检查表是否需要重建
+    async with conn.execute("PRAGMA table_info(sect_daily_tasks)") as cursor:
+        columns = await cursor.fetchall()
+        column_names = [col[1] for col in columns]
+
+    # 如果表使用旧结构（tasks_completed字段），需要重建
+    if 'tasks_completed' in column_names and 'donated_stone' not in column_names:
+        logger.info("重建 sect_daily_tasks 表以使用新结构")
+
+        # 备份数据
+        await conn.execute("ALTER TABLE sect_daily_tasks RENAME TO sect_daily_tasks_old")
+
+        # 创建新表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS sect_daily_tasks (
+                user_id TEXT PRIMARY KEY,
+                task_date TEXT NOT NULL,
+                donated_stone INTEGER DEFAULT 0,
+                completed_adventure INTEGER DEFAULT 0,
+                harvested_farm INTEGER DEFAULT 0,
+                completed_rift INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+            )
+        """)
+
+        # 迁移数据（保留user_id和task_date，任务重置）
+        await conn.execute("""
+            INSERT INTO sect_daily_tasks (user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift)
+            SELECT user_id, task_date, 0, 0, 0, 0
+            FROM sect_daily_tasks_old
+        """)
+
+        # 删除旧表
+        await conn.execute("DROP TABLE sect_daily_tasks_old")
+        logger.info("sect_daily_tasks 表重建完成")
+
+    # 创建索引
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_daily_tasks_date ON sect_daily_tasks(task_date)")
+
+    await conn.commit()
+    logger.info("v30迁移完成：宗门福利升级系统完善")

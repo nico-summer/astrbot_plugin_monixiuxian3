@@ -164,6 +164,12 @@ class SectHandlers:
             current_status = UserStatus.get_name(user_cd.type)
             yield event.plain_result(f"❌ 你当前正{current_status}，无法进行此操作！")
             return
+
+        # 检查并归还过期功法
+        has_expired, expired_list = await self.sect_mgr.check_borrowed_techniques(user_id)
+        if has_expired and expired_list:
+            yield event.plain_result(f"⏰ 你借用的功法已到期归还：{'、'.join(expired_list)}")
+
         success, msg = await self.sect_mgr.borrow_technique(user_id, technique_name)
         yield event.plain_result(msg)
 

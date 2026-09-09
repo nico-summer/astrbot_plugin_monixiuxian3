@@ -233,9 +233,15 @@ class SectManager:
         
         # 增加宗门建设度和灵石（1灵石 = 10建设度）
         await self.db.ext.donate_to_sect(player.sect_id, stone_amount)
-        
+
         scale_gained = stone_amount * 10
-        
+
+        # 检查并完成每日任务（捐献>=1000灵石）
+        if stone_amount >= 1000:
+            success, contribution = await self.complete_daily_task(user_id, "donate_stone")
+            if success:
+                return True, f"✨ 捐献成功！消耗 {stone_amount} 灵石，宗门获得 {scale_gained} 建设度！\n你的宗门贡献度：{player.sect_contribution}\n\n🎉 完成宗门每日任务「捐献灵石」，额外获得 {contribution} 贡献度！"
+
         return True, f"✨ 捐献成功！消耗 {stone_amount} 灵石，宗门获得 {scale_gained} 建设度！\n你的宗门贡献度：{player.sect_contribution}"
     
     async def get_sect_info(self, user_id: str) -> Tuple[bool, str, Optional[Dict]]:
@@ -641,8 +647,8 @@ class SectManager:
 
         # 检查当前借用数量（最多2个）
         cursor = await self.db.conn.execute(
-            "SELECT COUNT(*) FROM sect_technique_borrow WHERE user_id = ? AND return_time > ?",
-            (user_id, int(time.time()))
+            "SELECT COUNT(*) FROM sect_technique_borrow WHERE user_id = ? AND is_active = 1",
+            (user_id,)
         )
         current_borrow_count = (await cursor.fetchone())[0]
         if current_borrow_count >= 2:
@@ -650,8 +656,8 @@ class SectManager:
 
         # 检查是否已借用该功法
         cursor = await self.db.conn.execute(
-            "SELECT id FROM sect_technique_borrow WHERE user_id = ? AND technique_name = ? AND return_time > ?",
-            (user_id, technique_name, int(time.time()))
+            "SELECT id FROM sect_technique_borrow WHERE user_id = ? AND technique_name = ? AND is_active = 1",
+            (user_id, technique_name)
         )
         if await cursor.fetchone():
             return False, f"❌ 你已借用功法【{technique_name}】！"
@@ -660,7 +666,7 @@ class SectManager:
         borrow_time = int(time.time())
         return_time = borrow_time + 7 * 24 * 3600  # 7天后
         await self.db.conn.execute(
-            "INSERT INTO sect_technique_borrow (sect_id, user_id, technique_name, borrow_time, return_time) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO sect_technique_borrow (sect_id, user_id, technique_name, borrow_time, return_time, is_active) VALUES (?, ?, ?, ?, ?, 1)",
             (player.sect_id, user_id, technique_name, borrow_time, return_time)
         )
 
@@ -735,9 +741,9 @@ class SectManager:
         """
         current_time = int(time.time())
 
-        # 查找过期的借用记录
+        # 查找过期且活跃的借用记录
         cursor = await self.db.conn.execute(
-            "SELECT id, technique_name FROM sect_technique_borrow WHERE user_id = ? AND return_time <= ?",
+            "SELECT id, technique_name FROM sect_technique_borrow WHERE user_id = ? AND return_time <= ? AND is_active = 1",
             (user_id, current_time)
         )
         expired_borrows = await cursor.fetchall()
@@ -759,9 +765,9 @@ class SectManager:
             elif technique_name in techniques:
                 techniques.remove(technique_name)
 
-            # 删除借用记录
+            # 标记借用记录为已归还
             await self.db.conn.execute(
-                "DELETE FROM sect_technique_borrow WHERE id = ?",
+                "UPDATE sect_technique_borrow SET is_active = 0 WHERE id = ?",
                 (borrow_id,)
             )
 
@@ -792,23 +798,28 @@ class SectManager:
 
         # 获取今日任务记录
         cursor = await self.db.conn.execute(
-            "SELECT tasks_completed FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
+            "SELECT donated_stone, completed_adventure, harvested_farm, completed_rift FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
             (user_id, today)
         )
         row = await cursor.fetchone()
 
         if row:
-            import json
-            tasks_completed = json.loads(row[0])
+            donated_stone, completed_adventure, harvested_farm, completed_rift = row
         else:
-            tasks_completed = {}
+            # 创建今日记录
+            await self.db.conn.execute(
+                "INSERT INTO sect_daily_tasks (user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift) VALUES (?, ?, 0, 0, 0, 0)",
+                (user_id, today)
+            )
+            await self.db.conn.commit()
+            donated_stone = completed_adventure = harvested_farm = completed_rift = 0
 
         # 定义任务列表
         all_tasks = {
-            "donate_stone": {"name": "捐献灵石", "desc": "捐献1000灵石", "reward": 50, "completed": tasks_completed.get("donate_stone", False)},
-            "adventure": {"name": "完成历练", "desc": "完成任意历练", "reward": 30, "completed": tasks_completed.get("adventure", False)},
-            "farm_harvest": {"name": "种植灵草", "desc": "收获灵田", "reward": 20, "completed": tasks_completed.get("farm_harvest", False)},
-            "rift_explore": {"name": "探索秘境", "desc": "完成秘境探索", "reward": 40, "completed": tasks_completed.get("rift_explore", False)},
+            "donate_stone": {"name": "捐献灵石", "desc": "捐献1000灵石", "reward": 50, "completed": bool(donated_stone)},
+            "adventure": {"name": "完成历练", "desc": "完成任意历练", "reward": 30, "completed": bool(completed_adventure)},
+            "farm_harvest": {"name": "种植灵草", "desc": "收获灵田", "reward": 20, "completed": bool(harvested_farm)},
+            "rift_explore": {"name": "探索秘境", "desc": "完成秘境探索", "reward": 40, "completed": bool(completed_rift)},
         }
 
         msg = "📋 宗门每日任务\n"
@@ -845,30 +856,41 @@ class SectManager:
 
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # 获取今日任务记录
+        # 映射任务类型到列名
+        task_column_map = {
+            "donate_stone": "donated_stone",
+            "adventure": "completed_adventure",
+            "farm_harvest": "harvested_farm",
+            "rift_explore": "completed_rift",
+        }
+
+        column_name = task_column_map.get(task_type)
+        if not column_name:
+            return False, 0
+
+        # 获取或创建今日任务记录
         cursor = await self.db.conn.execute(
-            "SELECT tasks_completed FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
+            f"SELECT {column_name} FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
             (user_id, today)
         )
         row = await cursor.fetchone()
 
-        import json
         if row:
-            tasks_completed = json.loads(row[0])
+            # 检查是否已完成
+            if row[0] == 1:
+                return False, 0
         else:
-            tasks_completed = {}
-
-        # 检查是否已完成
-        if tasks_completed.get(task_type, False):
-            return False, 0
+            # 创建今日记录
+            await self.db.conn.execute(
+                "INSERT INTO sect_daily_tasks (user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift) VALUES (?, ?, 0, 0, 0, 0)",
+                (user_id, today)
+            )
+            await self.db.conn.commit()
 
         # 标记为已完成
-        tasks_completed[task_type] = True
-
-        # 更新或插入记录
         await self.db.conn.execute(
-            "INSERT OR REPLACE INTO sect_daily_tasks (user_id, task_date, tasks_completed) VALUES (?, ?, ?)",
-            (user_id, today, json.dumps(tasks_completed))
+            f"UPDATE sect_daily_tasks SET {column_name} = 1 WHERE user_id = ? AND task_date = ?",
+            (user_id, today)
         )
         await self.db.conn.commit()
 

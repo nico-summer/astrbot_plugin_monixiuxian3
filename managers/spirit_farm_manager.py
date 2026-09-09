@@ -8,6 +8,7 @@ from ..models import Player
 
 if TYPE_CHECKING:
     from ..core import StorageRingManager
+    from .sect_manager import SectManager
 
 __all__ = ["SpiritFarmManager"]
 
@@ -32,10 +33,11 @@ FARM_LEVELS = {
 
 class SpiritFarmManager:
     """灵田管理器"""
-    
-    def __init__(self, db: DataBase, storage_ring_manager: "StorageRingManager" = None):
+
+    def __init__(self, db: DataBase, storage_ring_manager: "StorageRingManager" = None, sect_manager: "SectManager" = None):
         self.db = db
         self.storage_ring_manager = storage_ring_manager
+        self.sect_manager = sect_manager
     
     async def get_user_farm(self, user_id: str) -> Optional[Dict]:
         """获取用户灵田信息"""
@@ -256,10 +258,16 @@ class SpiritFarmManager:
         if withered_crops:
             withered_names = [c["name"] for c in withered_crops]
             msg_lines.append(f"💀 枯萎清除：{', '.join(withered_names)}（共{len(withered_crops)}株）")
-        
+
+        # 完成宗门每日任务
+        if mature_crops and player.sect_id != 0 and self.sect_manager:
+            success, contribution = await self.sect_manager.complete_daily_task(player.user_id, "farm_harvest")
+            if success and contribution > 0:
+                msg_lines.append(f"\n🎉 完成宗门每日任务「种植灵草」，获得 {contribution} 贡献度！")
+
         msg_lines.append("━━━━━━━━━━━━━━━")
         msg_lines.append(f"剩余种植：{len(remaining_crops)} 株")
-        
+
         return True, "\n".join(msg_lines)
     
     async def upgrade_farm(self, player: Player) -> Tuple[bool, str]:
