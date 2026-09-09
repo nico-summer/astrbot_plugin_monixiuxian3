@@ -176,6 +176,8 @@ CMD_SPIRIT_EYE_RELEASE = "释放灵眼"
 # Phase 5: 师徒系统
 CMD_BECOME_MENTOR = "收徒"
 CMD_BECOME_APPRENTICE = "拜师"
+CMD_ACCEPT_MENTORSHIP = "接受拜师"
+CMD_REJECT_MENTORSHIP = "拒绝拜师"
 CMD_MENTORSHIP_INFO = "师徒信息"
 CMD_INITIATION = "灌顶"
 CMD_EXPEL_APPRENTICE = "逐出师门"
@@ -1575,6 +1577,18 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_become_apprentice(self, event: AstrMessageEvent, target: str = ""):
         async for r in self.mentorship_handlers.handle_become_apprentice(event, target):
+            yield r
+
+    @filter.command(CMD_ACCEPT_MENTORSHIP, "接受拜师")
+    @require_whitelist
+    async def handle_accept_mentorship(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.mentorship_handlers.handle_accept_mentorship(event, target):
+            yield r
+
+    @filter.command(CMD_REJECT_MENTORSHIP, "拒绝拜师")
+    @require_whitelist
+    async def handle_reject_mentorship(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.mentorship_handlers.handle_reject_mentorship(event, target):
             yield r
 
     @filter.command(CMD_MENTORSHIP_INFO, "查看师徒信息")

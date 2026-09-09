@@ -21,7 +21,7 @@ class MentorshipHandlers:
 
     @player_required
     async def handle_become_mentor(self, player: Player, event: AstrMessageEvent, target: str = ""):
-        """收徒"""
+        """收徒（邀请）"""
         target_id = self._extract_user_id(target)
         if not target_id:
             yield event.plain_result(
@@ -36,7 +36,8 @@ class MentorshipHandlers:
                 "  • 每日可为徒弟灌顶一次\n"
                 "  • 徒弟出师获得丰厚奖励\n"
                 "━━━━━━━━━━━━━━━\n"
-                "💡 使用：收徒 @某人"
+                "💡 使用：收徒 @某人\n"
+                "💡 对方需使用【接受拜师】确认"
             )
             return
 
@@ -50,12 +51,12 @@ class MentorshipHandlers:
             yield event.plain_result("不能收自己为徒！")
             return
 
-        success, msg = await self.mgr.create_mentorship(player.user_id, target_id)
+        success, msg = await self.mgr.create_mentorship_request(player.user_id, target_id, "mentor")
         yield event.plain_result(msg)
 
     @player_required
     async def handle_become_apprentice(self, player: Player, event: AstrMessageEvent, target: str = ""):
-        """拜师"""
+        """拜师（请求）"""
         target_id = self._extract_user_id(target)
         if not target_id:
             yield event.plain_result(
@@ -70,7 +71,8 @@ class MentorshipHandlers:
                 "  • 快速提升修为\n"
                 "  • 达到筑基期出师获得奖励\n"
                 "━━━━━━━━━━━━━━━\n"
-                "💡 使用：拜师 @某人"
+                "💡 使用：拜师 @某人\n"
+                "💡 对方需使用【接受拜师】确认"
             )
             return
 
@@ -84,7 +86,47 @@ class MentorshipHandlers:
             yield event.plain_result("不能拜自己为师！")
             return
 
-        success, msg = await self.mgr.create_mentorship(target_id, player.user_id)
+        success, msg = await self.mgr.create_mentorship_request(player.user_id, target_id, "apprentice")
+        yield event.plain_result(msg)
+
+    @player_required
+    async def handle_accept_mentorship(self, player: Player, event: AstrMessageEvent, target: str = ""):
+        """接受拜师请求"""
+        # 如果有@人，则接受该人的请求
+        if target:
+            target_id = self._extract_user_id(target)
+            if not target_id:
+                yield event.plain_result("请@要接受的对象")
+                return
+        else:
+            # 如果没有@人，则接受最新的请求
+            request = await self.mgr.get_pending_request(player.user_id)
+            if not request:
+                yield event.plain_result("没有待处理的拜师请求")
+                return
+            target_id = request['from_id']
+
+        success, msg = await self.mgr.accept_mentorship_request(player.user_id, target_id)
+        yield event.plain_result(msg)
+
+    @player_required
+    async def handle_reject_mentorship(self, player: Player, event: AstrMessageEvent, target: str = ""):
+        """拒绝拜师请求"""
+        # 如果有@人，则拒绝该人的请求
+        if target:
+            target_id = self._extract_user_id(target)
+            if not target_id:
+                yield event.plain_result("请@要拒绝的对象")
+                return
+        else:
+            # 如果没有@人，则拒绝最新的请求
+            request = await self.mgr.get_pending_request(player.user_id)
+            if not request:
+                yield event.plain_result("没有待处理的拜师请求")
+                return
+            target_id = request['from_id']
+
+        success, msg = await self.mgr.reject_mentorship_request(player.user_id, target_id)
         yield event.plain_result(msg)
 
     @player_required

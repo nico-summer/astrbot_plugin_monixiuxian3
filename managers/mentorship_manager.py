@@ -68,41 +68,169 @@ class MentorshipManager:
 
         return True, ""
 
-    async def create_mentorship(self, mentor_id: str, apprentice_id: str) -> Tuple[bool, str]:
-        """建立师徒关系"""
+    async def create_mentorship_request(self, from_id: str, target_id: str, request_type: str) -> Tuple[bool, str]:
+        """创建拜师请求（request_type: 'apprentice'徒弟请求拜师, 'mentor'师父邀请收徒）"""
+        from_player = await self.db.get_player_by_id(from_id)
+        target_player = await self.db.get_player_by_id(target_id)
+
+        if not from_player or not target_player:
+            return False, "玩家不存在"
+
+        # 根据请求类型验证资格
+        if request_type == "apprentice":
+            # 徒弟请求拜师：验证徒弟资格和师父资格
+            can_apprentice, msg = await self.can_be_apprentice(from_player)
+            if not can_apprentice:
+                return False, msg
+
+            can_mentor, msg = await self.can_be_mentor(target_player)
+            if not can_mentor:
+                return False, msg
+
+            mentor_id = target_id
+            apprentice_id = from_id
+        else:  # request_type == "mentor"
+            # 师父邀请收徒：验证师父资格和徒弟资格
+            can_mentor, msg = await self.can_be_mentor(from_player)
+            if not can_mentor:
+                return False, msg
+
+            can_apprentice, msg = await self.can_be_apprentice(target_player)
+            if not can_apprentice:
+                return False, msg
+
+            mentor_id = from_id
+            apprentice_id = target_id
+
+        # 检查是否已有待处理请求
+        cursor = await self.db.conn.execute(
+            "SELECT id FROM mentorship_requests WHERE from_id = ? AND target_id = ?",
+            (from_id, target_id)
+        )
+        existing = await cursor.fetchone()
+        if existing:
+            return False, "已有待处理的请求，请等待对方回应"
+
+        # 创建请求
+        current_time = int(time.time())
+        from_name = from_player.user_name or f"道友{from_id[-6:]}"
+        target_name = target_player.user_name or f"道友{target_id[-6:]}"
+
+        await self.db.conn.execute(
+            """
+            INSERT INTO mentorship_requests (
+                from_id, from_name, target_id, target_name, request_type, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (from_id, from_name, target_id, target_name, request_type, current_time)
+        )
+        await self.db.conn.commit()
+
+        if request_type == "apprentice":
+            return True, f"🙏 已向{target_name}发送拜师请求，等待对方同意"
+        else:
+            return True, f"👨‍🏫 已向{target_name}发送收徒邀请，等待对方同意"
+
+    async def accept_mentorship_request(self, target_id: str, from_id: str) -> Tuple[bool, str]:
+        """接受拜师请求"""
+        # 获取请求
+        cursor = await self.db.conn.execute(
+            "SELECT * FROM mentorship_requests WHERE from_id = ? AND target_id = ?",
+            (from_id, target_id)
+        )
+        request = await cursor.fetchone()
+        if not request:
+            return False, "没有待处理的请求"
+
+        request_dict = dict(request)
+        request_type = request_dict['request_type']
+
+        # 确定师父和徒弟
+        if request_type == "apprentice":
+            mentor_id = target_id
+            apprentice_id = from_id
+        else:  # request_type == "mentor"
+            mentor_id = from_id
+            apprentice_id = target_id
+
+        # 再次验证资格（防止状态变化）
         mentor = await self.db.get_player_by_id(mentor_id)
         apprentice = await self.db.get_player_by_id(apprentice_id)
 
         if not mentor or not apprentice:
+            await self.db.conn.execute("DELETE FROM mentorship_requests WHERE id = ?", (request_dict['id'],))
+            await self.db.conn.commit()
             return False, "玩家不存在"
 
-        # 检查师父资格
         can_mentor, msg = await self.can_be_mentor(mentor)
         if not can_mentor:
+            await self.db.conn.execute("DELETE FROM mentorship_requests WHERE id = ?", (request_dict['id'],))
+            await self.db.conn.commit()
             return False, msg
 
-        # 检查徒弟资格
         can_apprentice, msg = await self.can_be_apprentice(apprentice)
         if not can_apprentice:
+            await self.db.conn.execute("DELETE FROM mentorship_requests WHERE id = ?", (request_dict['id'],))
+            await self.db.conn.commit()
             return False, msg
 
         # 创建师徒关系
         current_time = int(time.time())
+        await self.db.conn.execute("BEGIN IMMEDIATE")
+        try:
+            await self.db.conn.execute(
+                """
+                INSERT INTO mentorship (
+                    mentor_id, apprentice_id, status, start_time,
+                    last_initiation_time, total_mentor_rewards
+                ) VALUES (?, ?, 'active', ?, 0, 0)
+                """,
+                (mentor_id, apprentice_id, current_time)
+            )
+
+            # 删除请求
+            await self.db.conn.execute("DELETE FROM mentorship_requests WHERE id = ?", (request_dict['id'],))
+
+            await self.db.conn.commit()
+
+            mentor_name = mentor.user_name or f"道友{mentor_id[-6:]}"
+            apprentice_name = apprentice.user_name or f"道友{apprentice_id[-6:]}"
+
+            return True, f"🎊 {apprentice_name}成功拜入{mentor_name}门下！\n师徒同心，共证大道！"
+        except Exception as e:
+            await self.db.conn.rollback()
+            return False, f"建立师徒关系失败：{str(e)}"
+
+    async def reject_mentorship_request(self, target_id: str, from_id: str) -> Tuple[bool, str]:
+        """拒绝拜师请求"""
+        cursor = await self.db.conn.execute(
+            "SELECT * FROM mentorship_requests WHERE from_id = ? AND target_id = ?",
+            (from_id, target_id)
+        )
+        request = await cursor.fetchone()
+        if not request:
+            return False, "没有待处理的请求"
+
         await self.db.conn.execute(
-            """
-            INSERT INTO mentorship (
-                mentor_id, apprentice_id, status, start_time,
-                last_initiation_time, total_mentor_rewards
-            ) VALUES (?, ?, 'active', ?, 0, 0)
-            """,
-            (mentor_id, apprentice_id, current_time)
+            "DELETE FROM mentorship_requests WHERE from_id = ? AND target_id = ?",
+            (from_id, target_id)
         )
         await self.db.conn.commit()
 
-        mentor_name = mentor.user_name or f"道友{mentor_id[-6:]}"
-        apprentice_name = apprentice.user_name or f"道友{apprentice_id[-6:]}"
+        request_dict = dict(request)
+        from_name = request_dict['from_name']
+        return True, f"已拒绝{from_name}的请求"
 
-        return True, f"🎊 {apprentice_name}成功拜入{mentor_name}门下！\n师徒同心，共证大道！"
+    async def get_pending_request(self, target_id: str) -> Optional[Dict]:
+        """获取待处理的拜师请求"""
+        cursor = await self.db.conn.execute(
+            "SELECT * FROM mentorship_requests WHERE target_id = ? ORDER BY created_at DESC LIMIT 1",
+            (target_id,)
+        )
+        row = await cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
 
     async def get_mentorship(self, mentor_id: str = None, apprentice_id: str = None) -> Optional[Dict]:
         """获取师徒关系"""
@@ -133,11 +261,24 @@ class MentorshipManager:
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-    async def perform_initiation(self, mentor: Player, apprentice: Player) -> Tuple[bool, str]:
-        """师父为徒弟灌顶"""
-        # 获取师徒关系
-        mentorship = await self.get_mentorship(mentor_id=mentor.user_id)
-        if not mentorship or mentorship['apprentice_id'] != apprentice.user_id:
+    async def perform_initiation(self, initiator: Player, target: Player) -> Tuple[bool, str]:
+        """灌顶（支持师父->徒弟 或 徒弟->师父）"""
+        # 检查师徒关系（双向检查）
+        mentorship_as_mentor = await self.get_mentorship(mentor_id=initiator.user_id)
+        mentorship_as_apprentice = await self.get_mentorship(apprentice_id=initiator.user_id)
+
+        # 判断是师父灌顶徒弟还是徒弟灌顶师父
+        if mentorship_as_mentor and mentorship_as_mentor['apprentice_id'] == target.user_id:
+            # 师父灌顶徒弟
+            mentorship = mentorship_as_mentor
+            mentor = initiator
+            apprentice = target
+        elif mentorship_as_apprentice and mentorship_as_apprentice['mentor_id'] == target.user_id:
+            # 徒弟灌顶师父
+            mentorship = mentorship_as_apprentice
+            mentor = target
+            apprentice = initiator
+        else:
             return False, "你们不是师徒关系"
 
         # 检查冷却时间

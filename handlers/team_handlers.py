@@ -24,8 +24,15 @@ class TeamHandlers:
         """邀请队员"""
         user_id = event.get_sender_id()
 
+        # 调试日志
+        from astrbot.api import logger
+        logger.info(f"[组队] 邀请指令 - message_str: {event.message_str}")
+        logger.info(f"[组队] 邀请指令 - target参数: {target}")
+
         # 提取目标用户ID
         target_id = self._extract_user_id(event, target)
+        logger.info(f"[组队] 提取到的target_id: {target_id}")
+
         if not target_id:
             yield event.plain_result("❌ 请@要邀请的玩家，例如：/邀请入队 @某人")
             return
@@ -72,8 +79,15 @@ class TeamHandlers:
         """踢出队员"""
         user_id = event.get_sender_id()
 
+        # 调试日志
+        from astrbot.api import logger
+        logger.info(f"[组队] 踢人指令 - message_str: {event.message_str}")
+        logger.info(f"[组队] 踢人指令 - target参数: {target}")
+
         # 提取目标用户ID
         target_id = self._extract_user_id(event, target)
+        logger.info(f"[组队] 提取到的target_id: {target_id}")
+
         if not target_id:
             yield event.plain_result("❌ 请@要踢出的玩家，例如：/踢出队伍 @某人")
             return
@@ -178,8 +192,15 @@ class TeamHandlers:
             yield event.plain_result("❌ 请输入物品编号和目标玩家，例如：/分配物品 1 @某人")
             return
 
+        # 调试日志
+        from astrbot.api import logger
+        logger.info(f"[组队] 分配物品指令 - message_str: {event.message_str}")
+        logger.info(f"[组队] 分配物品指令 - target参数: {target}")
+
         # 提取目标用户ID
         target_id = self._extract_user_id(event, target)
+        logger.info(f"[组队] 提取到的target_id: {target_id}")
+
         if not target_id:
             yield event.plain_result("❌ 请@要分配给的玩家，例如：/分配物品 1 @某人")
             return
@@ -254,32 +275,24 @@ class TeamHandlers:
         从消息中提取用户ID
 
         优先级：
-        1. 消息中的@提及
-        2. target_arg参数
+        1. 从完整消息字符串中提取At
+        2. 从target_arg参数提取
         """
-        # 尝试从消息的at列表获取
-        message_str = event.message_str
+        # 尝试从完整消息中提取At（包括原始消息和参数）
+        full_message = event.message_str
 
-        # 检查是否有at_list（OneBot v11）
-        if hasattr(event, 'message_obj') and hasattr(event.message_obj, 'get'):
-            raw_message = event.message_obj.get('message', [])
-            for seg in raw_message:
-                if isinstance(seg, dict) and seg.get('type') == 'at':
-                    at_id = seg.get('data', {}).get('qq', '')
-                    if at_id and at_id != 'all':
-                        return str(at_id)
+        # CQ码格式：[CQ:at,qq=123456]
+        at_match = re.search(r'\[CQ:at,qq=(\d+)\]', full_message)
+        if at_match:
+            return at_match.group(1)
 
-        # 尝试从纯文本参数提取（如果用户直接输入了QQ号）
+        # 尝试从target_arg提取（如果用户直接输入了QQ号）
         if target_arg:
             # 移除@符号和空格
             clean_target = target_arg.strip().replace('@', '').strip()
-            if clean_target.isdigit():
-                return clean_target
-
-        # 尝试从消息文本中提取@信息
-        at_pattern = r'\[CQ:at,qq=(\d+)\]'
-        matches = re.findall(at_pattern, message_str)
-        if matches:
-            return matches[0]
+            # 提取5-12位数字（QQ号范围）
+            num_match = re.search(r'(\d{5,12})', clean_target)
+            if num_match:
+                return num_match.group(1)
 
         return ""

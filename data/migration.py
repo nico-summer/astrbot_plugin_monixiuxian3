@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 28  # v28: 组队秘境系统
+LATEST_DB_VERSION = 29  # v29: 拜师请求系统
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -1325,3 +1325,30 @@ async def _migrate_to_v28(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v28迁移完成：组队秘境系统")
+
+@migration(29)
+async def _migrate_to_v29(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v29 - 拜师请求系统"""
+    logger.info("开始迁移到v29：拜师请求系统")
+
+    # 创建拜师请求表
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS mentorship_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_id TEXT NOT NULL,
+            from_name TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            target_name TEXT NOT NULL,
+            request_type TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (from_id) REFERENCES players(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (target_id) REFERENCES players(user_id) ON DELETE CASCADE
+        )
+    """)
+
+    # 创建索引
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_mentorship_req_target ON mentorship_requests(target_id)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_mentorship_req_from ON mentorship_requests(from_id)")
+
+    await conn.commit()
+    logger.info("v29迁移完成：拜师请求系统")
