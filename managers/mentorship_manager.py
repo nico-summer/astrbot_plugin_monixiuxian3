@@ -70,8 +70,8 @@ class MentorshipManager:
 
     async def create_mentorship(self, mentor_id: str, apprentice_id: str) -> Tuple[bool, str]:
         """建立师徒关系"""
-        mentor = await self.db.get_player(mentor_id)
-        apprentice = await self.db.get_player(apprentice_id)
+        mentor = await self.db.get_player_by_id(mentor_id)
+        apprentice = await self.db.get_player_by_id(apprentice_id)
 
         if not mentor or not apprentice:
             return False, "玩家不存在"
@@ -225,7 +225,7 @@ class MentorshipManager:
 
         # 自动出师
         mentor_id = mentorship['mentor_id']
-        mentor = await self.db.get_player(mentor_id)
+        mentor = await self.db.get_player_by_id(mentor_id)
 
         await self.db.conn.execute("BEGIN IMMEDIATE")
         try:
@@ -306,7 +306,7 @@ class MentorshipManager:
         if apprentices:
             info_lines.append("【您的徒弟】")
             for i, mentorship in enumerate(apprentices, 1):
-                apprentice = await self.db.get_player(mentorship['apprentice_id'])
+                apprentice = await self.db.get_player_by_id(mentorship['apprentice_id'])
                 if apprentice:
                     name = apprentice.user_name or f"道友{mentorship['apprentice_id'][-6:]}"
                     level = apprentice.get_level(self.config)
@@ -320,7 +320,7 @@ class MentorshipManager:
         # 检查是否是徒弟
         mentorship = await self.get_mentorship(apprentice_id=player.user_id)
         if mentorship:
-            mentor = await self.db.get_player(mentorship['mentor_id'])
+            mentor = await self.db.get_player_by_id(mentorship['mentor_id'])
             if mentor:
                 info_lines.append("\n【您的师父】")
                 name = mentor.user_name or f"道友{mentorship['mentor_id'][-6:]}"

@@ -41,7 +41,7 @@ class MentorshipHandlers:
             return
 
         # 检查目标玩家
-        target_player = await self.db.get_player(target_id)
+        target_player = await self.db.get_player_by_id(target_id)
         if not target_player:
             yield event.plain_result("对方尚未踏入修仙之路")
             return
@@ -75,7 +75,7 @@ class MentorshipHandlers:
             return
 
         # 检查目标玩家
-        target_player = await self.db.get_player(target_id)
+        target_player = await self.db.get_player_by_id(target_id)
         if not target_player:
             yield event.plain_result("对方尚未踏入修仙之路")
             return
@@ -110,7 +110,7 @@ class MentorshipHandlers:
             return
 
         # 检查目标玩家
-        apprentice = await self.db.get_player(target_id)
+        apprentice = await self.db.get_player_by_id(target_id)
         if not apprentice:
             yield event.plain_result("对方尚未踏入修仙之路")
             return
@@ -136,7 +136,7 @@ class MentorshipHandlers:
 
         success, msg = await self.mgr.dissolve_mentorship(player.user_id, target_id)
         if success:
-            apprentice = await self.db.get_player(target_id)
+            apprentice = await self.db.get_player_by_id(target_id)
             name = apprentice.user_name if apprentice else f"道友{target_id[-6:]}"
             yield event.plain_result(f"已将{name}逐出师门")
         else:
@@ -154,7 +154,7 @@ class MentorshipHandlers:
         success, msg = await self.mgr.dissolve_mentorship(mentor_id, player.user_id)
 
         if success:
-            mentor = await self.db.get_player(mentor_id)
+            mentor = await self.db.get_player_by_id(mentor_id)
             name = mentor.user_name if mentor else f"道友{mentor_id[-6:]}"
             yield event.plain_result(f"您已离开{name}的师门")
         else:
