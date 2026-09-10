@@ -8,7 +8,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from .data import DataBase, MigrationManager
 from .config_manager import ConfigManager
 from .handlers import (
-    MiscHandler, PlayerHandler, EquipmentHandler, BreakthroughHandler,
+    MiscHandler, HelpHandler, PlayerHandler, EquipmentHandler, BreakthroughHandler,
     PillHandler, ShopHandler, StorageRingHandler,
     SectHandlers, BossHandlers, CombatHandlers, RankingHandlers,
     RiftHandlers, AdventureHandlers, AlchemyHandlers, ImpartHandlers,
@@ -38,6 +38,27 @@ def require_whitelist(func):
 
 # 指令定义
 CMD_HELP = "修仙帮助"
+
+# 系统详解帮助（<系统>帮助），主题定义见 handlers/help_handler.py
+CMD_HELP_TOPICS = {
+    "宗门": "宗门帮助",
+    "组队": "组队帮助",
+    "秘境": "秘境帮助",
+    "炼丹": "炼丹帮助",
+    "灵田": "灵田帮助",
+    "师徒": "师徒帮助",
+    "悬赏": "悬赏帮助",
+    "历练": "历练帮助",
+    "洞天": "洞天帮助",
+    "银行": "银行帮助",
+    "丹药": "丹药帮助",
+    "战斗": "战斗帮助",
+    "储物戒": "储物戒帮助",
+    "灵眼": "灵眼帮助",
+    "双修": "双修帮助",
+    "传承": "传承帮助",
+    "排行": "排行帮助",
+}
 CMD_START_XIUXIAN = "我要修仙"
 CMD_PLAYER_INFO = "我的信息"
 CMD_START_CULTIVATION = "闭关"
@@ -82,7 +103,7 @@ CMD_SECT_LIST = "宗门列表"
 CMD_SECT_DONATE = "宗门捐献"
 CMD_SECT_KICK = "踢出成员"
 CMD_SECT_TRANSFER = "宗主传位"
-CMD_SECT_TASK = "宗门任务"
+CMD_SECT_TASK = "宗门建设"  # 旧的宗门建设任务（1小时冷却）；每日任务面板见 CMD_SECT_TASKS
 CMD_SECT_POSITION = "职位变更"
 CMD_SECT_TECHNIQUE_LIB = "宗门功法库"
 CMD_DONATE_TECHNIQUE = "捐献功法"
@@ -223,6 +244,7 @@ class XiuXianPlugin(Star):
         self.db = DataBase(str(db_path))
 
         self.misc_handler = MiscHandler(self.db)
+        self.help_handler = HelpHandler()
         self.player_handler = PlayerHandler(self.db, self.config, self.config_manager)
         self.equipment_handler = EquipmentHandler(self.db, self.config_manager)
         self.breakthrough_handler = BreakthroughHandler(self.db, self.config_manager, self.config)
@@ -832,10 +854,10 @@ class XiuXianPlugin(Star):
         except Exception as e:
             logger.error(f"【修仙插件】灵眼广播异常: {e}")
 
-    @filter.command(CMD_HELP, "显示帮助信息")
+    @filter.command(CMD_HELP, "显示帮助信息（可指定系统：修仙帮助 宗门）")
     @require_whitelist
-    async def handle_help(self, event: AstrMessageEvent):
-        async for r in self.misc_handler.handle_help(event):
+    async def handle_help(self, event: AstrMessageEvent, topic: str = ""):
+        async for r in self.misc_handler.handle_help(event, topic):
             yield r
 
     @filter.command(CMD_START_XIUXIAN, "开始你的修仙之路")
@@ -1091,6 +1113,110 @@ class XiuXianPlugin(Star):
         async for r in self.storage_ring_handler.handle_refine_all_alias(event):
             yield r
 
+    # ===== 系统详解帮助指令 =====
+
+    @filter.command(CMD_HELP_TOPICS["宗门"], "宗门系统详细帮助")
+    @require_whitelist
+    async def handle_help_sect(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "宗门"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["组队"], "组队秘境详细帮助")
+    @require_whitelist
+    async def handle_help_team(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "组队"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["秘境"], "秘境探索详细帮助")
+    @require_whitelist
+    async def handle_help_rift(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "秘境"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["炼丹"], "炼丹系统详细帮助")
+    @require_whitelist
+    async def handle_help_alchemy(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "炼丹"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["灵田"], "灵田系统详细帮助")
+    @require_whitelist
+    async def handle_help_farm(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "灵田"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["师徒"], "师徒系统详细帮助")
+    @require_whitelist
+    async def handle_help_mentorship(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "师徒"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["悬赏"], "悬赏任务详细帮助")
+    @require_whitelist
+    async def handle_help_bounty(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "悬赏"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["历练"], "历练系统详细帮助")
+    @require_whitelist
+    async def handle_help_adventure(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "历练"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["洞天"], "洞天福地详细帮助")
+    @require_whitelist
+    async def handle_help_land(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "洞天"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["银行"], "灵石银行详细帮助")
+    @require_whitelist
+    async def handle_help_bank(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "银行"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["丹药"], "丹药系统详细帮助")
+    @require_whitelist
+    async def handle_help_pill(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "丹药"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["战斗"], "战斗系统详细帮助")
+    @require_whitelist
+    async def handle_help_combat(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "战斗"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["储物戒"], "储物戒详细帮助")
+    @require_whitelist
+    async def handle_help_ring(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "储物戒"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["灵眼"], "灵眼系统详细帮助")
+    @require_whitelist
+    async def handle_help_eye(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "灵眼"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["双修"], "双修系统详细帮助")
+    @require_whitelist
+    async def handle_help_dual(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "双修"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["传承"], "传承系统详细帮助")
+    @require_whitelist
+    async def handle_help_impart(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "传承"):
+            yield r
+
+    @filter.command(CMD_HELP_TOPICS["排行"], "排行榜详细帮助")
+    @require_whitelist
+    async def handle_help_rank(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "排行"):
+            yield r
+
     # ===== 宗门系统指令 =====
 
     @filter.command(CMD_CREATE_SECT, "创建宗门")
@@ -1123,7 +1249,7 @@ class XiuXianPlugin(Star):
         async for r in self.sect_handlers.handle_my_sect(event):
             yield r
 
-    @filter.command(CMD_SECT_TASK, "执行宗门任务")
+    @filter.command(CMD_SECT_TASK, "执行宗门建设任务（1小时冷却）")
     @require_whitelist
     async def handle_sect_task(self, event: AstrMessageEvent):
         async for r in self.sect_handlers.handle_sect_task(event):

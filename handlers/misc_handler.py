@@ -1,6 +1,7 @@
 # handlers/misc_handler.py
 from astrbot.api.event import AstrMessageEvent
 from ..data import DataBase
+from .help_handler import HelpHandler
 
 __all__ = ["MiscHandler"]
 
@@ -10,11 +11,21 @@ class MiscHandler:
 
     def __init__(self, db: DataBase):
         self.db = db
+        self.help_handler = HelpHandler()
 
-    async def handle_help(self, event: AstrMessageEvent):
-        """显示帮助信息"""
+    async def handle_help(self, event: AstrMessageEvent, topic: str = ""):
+        """显示帮助信息
+
+        Args:
+            topic: 指定系统名时展示该系统详解（如「修仙帮助 宗门」），为空则显示总览
+        """
+        if topic and topic.strip():
+            detail = self.help_handler.render_topic(topic)
+            yield event.plain_result(detail if detail else self.help_handler.suggest(topic.strip()))
+            return
+
         help_text = (
-            "📖 修仙指令大全 v3.5.3\n"
+            "📖 修仙指令大全 v3.5.4\n"
             "━━━━━━━━━━━━━━━\n"
             "\n"
             "📖【入门 & 基础】\n"
@@ -233,6 +244,12 @@ class MiscHandler:
             "\n"
             "━━━━━━━━━━━━━━━\n"
             "💡 提示: 指令前加 / 使用，如 /我要修仙\n"
-            "📖 完整指令说明: 发送 /修仙帮助"
+            "\n"
+            "📚【系统详解】发送 <系统>帮助 查看完整玩法与数值\n"
+            "  宗门帮助 / 组队帮助 / 秘境帮助 / 炼丹帮助\n"
+            "  灵田帮助 / 师徒帮助 / 悬赏帮助 / 历练帮助\n"
+            "  洞天帮助 / 银行帮助 / 丹药帮助 / 战斗帮助\n"
+            "  储物戒帮助 / 灵眼帮助 / 双修帮助 / 传承帮助 / 排行帮助\n"
+            "  或使用：修仙帮助 <系统>（例：修仙帮助 宗门）"
         )
         yield event.plain_result(help_text)

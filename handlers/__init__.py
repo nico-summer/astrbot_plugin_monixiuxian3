@@ -2,6 +2,7 @@
 
 from .player_handler import PlayerHandler
 from .misc_handler import MiscHandler
+from .help_handler import HelpHandler
 from .equipment_handler import EquipmentHandler
 from .breakthrough_handler import BreakthroughHandler
 from .pill_handler import PillHandler
@@ -31,6 +32,7 @@ from .team_handlers import TeamHandlers
 __all__ = [
     "PlayerHandler",
     "MiscHandler",
+    "HelpHandler",
     "EquipmentHandler",
     "BreakthroughHandler",
     "PillHandler",

@@ -113,7 +113,11 @@ def player_required(func: Callable[..., Coroutine[any, any, AsyncGenerator[any, 
 
 
 def _is_command_allowed(message_text: str, allowed_commands: list) -> bool:
-    """检查命令是否在允许列表中"""
+    """检查命令是否在允许列表中（帮助类指令在忙碌状态下始终可用）"""
+    text = (message_text or "").strip().lstrip("/").strip()
+    if text.endswith("帮助"):
+        return True
+
     for cmd in allowed_commands:
         if message_text.startswith(cmd):
             return True
