@@ -3,12 +3,15 @@
 import re
 
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.all import At, Plain
 from ..data import DataBase
 from ..core import StorageRingManager
 from ..config_manager import ConfigManager
 from ..models import Player
-from .utils import player_required, extract_command_args
+from .utils import (
+    player_required,
+    extract_command_args,
+    resolve_target_user_id,
+)
 
 CMD_STORAGE_RING = "储物戒"
 CMD_STORE_ITEM = "存入"
@@ -351,65 +354,43 @@ class StorageRingHandler:
             yield event.plain_result(f"❌ {message}")
 
     @player_required
-    async def handle_gift_item(self, player: Player, event: AstrMessageEvent, args: str):
+    async def handle_gift_item(self, player: Player, event: AstrMessageEvent, args: str = ""):
         """赠予物品给其他玩家"""
-        target_id = None
-        item_name = None
-        count = 1
+        # AstrBot 只把指令后的首个 token 绑定到形参，而「赠予 @某人 物品 数量」的
+        # 首个 token 往往是 @提及本身，因此这里直接从原始消息解析完整参数。
+        raw = extract_command_args(event, CMD_GIFT_ITEM).strip()
+        if not raw:
+            raw = self._collect_plain_text(event).strip()
+        if not raw:
+            raw = (args or "").strip()
 
-        # 从消息链中提取 At 组件和 Plain 文本
-        text_parts = []
-        message_obj = getattr(event, "message_obj", None)
-        message_chain = getattr(message_obj, "message", []) or []
-        
-        for comp in message_chain:
-            if isinstance(comp, At):
-                # 兼容多种At属性名
-                if target_id is None:
-                    for attr_name in ("qq", "target", "uin", "user_id"):
-                        target_value = getattr(comp, attr_name, None)
-                        if target_value is not None and str(target_value).strip():
-                            target_id = str(target_value).strip()
-                            break
-            elif isinstance(comp, Plain):
-                text_parts.append(str(getattr(comp, "text", "") or ""))
+        # 解析赠予对象：At 组件 -> CQ 码 -> 纯数字QQ -> 道号/昵称
+        head = raw.split(" ", 1)[0].strip() if raw else ""
+        target_id = await resolve_target_user_id(self.db, event, head)
 
-        plain_text = "".join(text_parts).strip()
-        text_content = (args or plain_text or "").strip()
-
-        text_content = re.sub(
-            rf"^[^\w\s]*\s*{re.escape(CMD_GIFT_ITEM)}",
-            "",
-            text_content,
-            count=1,
+        # 去掉指令名残留与所有 @提及片段，剩下的才是「物品名 [数量]」
+        raw = re.sub(
+            rf"^[^\w\s]*\s*{re.escape(CMD_GIFT_ITEM)}\s*", "", raw, count=1, flags=re.IGNORECASE
         ).strip()
+        raw = re.sub(r"\[CQ:at,[^\]]*\]|<at[^>]*>|@\S+", " ", raw)
+        raw = re.sub(r"\s+", " ", raw).strip()
 
-        if target_id and text_content:
-            text_content = re.sub(
-                r"^(?:@[^\s]+|\[CQ:at,[^\]]+\]|<at[^>]*>)\s*",
-                "",
-                text_content,
-                count=1,
-                flags=re.IGNORECASE,
-            ).strip()
-        
-        # 如果没有从At组件获取到target_id，尝试从文本解析纯数字QQ号
-        if not target_id and text_content:
-            parts = text_content.split(None, 1)
-            if len(parts) >= 1:
-                potential_id = parts[0].lstrip('@')
-                if potential_id.isdigit() and len(potential_id) >= 5:
-                    target_id = potential_id
-                    text_content = parts[1].strip() if len(parts) > 1 else ""
+        # 目标以纯数字ID给出时，把该ID从物品文本中剔除
+        if target_id and raw:
+            head_token = raw.split(" ", 1)[0]
+            if head_token.lstrip("@") == str(target_id):
+                raw = raw[len(head_token):].strip()
 
         # 解析物品名和数量
-        if text_content:
-            parts = text_content.rsplit(None, 1)
+        item_name = None
+        count = 1
+        if raw:
+            parts = raw.rsplit(" ", 1)
             if len(parts) == 2 and parts[1].isdigit():
                 item_name = parts[0].strip()
                 count = int(parts[1])
             else:
-                item_name = text_content.strip()
+                item_name = raw.strip()
 
         # 验证必要参数
         if not target_id:
@@ -469,9 +450,10 @@ class StorageRingHandler:
             yield event.plain_result("赠予失败：无法创建赠予请求，物品已返还")
             return
 
+        target_display = target_player.user_name or f"@{target_id}"
         yield event.plain_result(
             f"📦 赠予请求已发送！\n"
-            f"【{item_name}】x{count} → @{target_id}\n"
+            f"【{item_name}】x{count} → {target_display}\n"
             f"等待对方确认...（24小时内有效）\n"
             f"对方可使用 {CMD_ACCEPT_GIFT} 接收或 {CMD_REJECT_GIFT} 拒绝"
         )
@@ -595,6 +577,27 @@ class StorageRingHandler:
             yield event.plain_result(f"✅ {message}")
         else:
             yield event.plain_result(f"❌ {message}")
+
+    @staticmethod
+    def _collect_plain_text(event: AstrMessageEvent) -> str:
+        """拼接消息链中的纯文本（跳过 @ 组件，兼容不同适配器）"""
+        message_obj = getattr(event, "message_obj", None)
+        chain = getattr(message_obj, "message", None)
+        if chain is None:
+            getter = getattr(event, "get_messages", None)
+            try:
+                chain = getter() if callable(getter) else None
+            except Exception:
+                chain = None
+
+        parts = []
+        for comp in list(chain or []):
+            if getattr(comp, "qq", None) is not None or getattr(comp, "uin", None) is not None:
+                continue
+            text = getattr(comp, "text", None)
+            if isinstance(text, str) and text:
+                parts.append(text)
+        return "".join(parts)
 
     @staticmethod
     def _join_args(event, command_name: str, *parts: str) -> str:

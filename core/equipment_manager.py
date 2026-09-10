@@ -41,6 +41,10 @@ class EquipmentManager:
         if not item_config:
             item_config = self._resolve_drop_equipment_config(item_name)
 
+        # 秘境等系统掉落的功法同样未登记进配置：按功法掉落表动态生成配置
+        if not item_config:
+            item_config = self._resolve_drop_skill_config(item_name)
+
         if not item_config:
             return None
 
@@ -79,6 +83,13 @@ class EquipmentManager:
             # 旧格式功法 -> technique
             item_type = "technique"
 
+        # 中文细分类型兜底（如“神通功法”“顶级心法”）
+        if item_type not in {"weapon", "armor", "accessory", "main_technique", "technique"}:
+            if "心法" in item_type:
+                item_type = "main_technique"
+            elif "功法" in item_type or "诀" in item_type or "术" in item_type:
+                item_type = "technique"
+
         return Item(
             item_id=item_config.get("id", item_name),
             name=item_name,
@@ -110,6 +121,21 @@ class EquipmentManager:
             return None
         try:
             return RiftManager.get_equipment_config(item_name)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _resolve_drop_skill_config(item_name: str) -> Optional[dict]:
+        """解析秘境等系统掉落的功法（未登记进 items.json / weapons.json）
+
+        避免「秘境掉落的功法只能炼化、无法装备」的问题。
+        """
+        try:
+            from ..managers.rift_manager import RiftManager
+        except Exception:
+            return None
+        try:
+            return RiftManager.get_skill_config(item_name)
         except Exception:
             return None
 

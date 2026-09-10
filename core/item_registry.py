@@ -180,13 +180,24 @@ class ItemRegistry:
                         "category": CATEGORY_EQUIPMENT,
                         "subtype": weapon_category or self._equipment_type_label(entry.get("type")),
                         "rank": entry.get("rank"),
+                        "description": entry.get("description"),
                         "source": "秘境探索掉落",
                     },
                 )
 
-            for level_config in (RiftManager.RIFT_SKILL_TABLE or {}).values():
-                for entry in (level_config or {}).get("items", []):
-                    self._register_drop_entry(entry, CATEGORY_TECHNIQUE, "秘境探索掉落")
+            # 秘境功法使用掉落表生成的配置，保证品质/细分类型与功法系统一致
+            for entry in RiftManager.get_skill_index().values():
+                self._register(
+                    entry["name"],
+                    CATEGORY_TECHNIQUE,
+                    {
+                        "category": CATEGORY_TECHNIQUE,
+                        "subtype": entry.get("subtype"),
+                        "rank": entry.get("rank"),
+                        "description": entry.get("description"),
+                        "source": "秘境探索掉落",
+                    },
+                )
         except Exception as exc:  # pragma: no cover - 索引失败不应影响插件启动
             self._build_error = f"秘境掉落表登记失败: {exc}"
 
@@ -309,10 +320,72 @@ class ItemRegistry:
         if info.get("source"):
             lines.append(f"获取途径：{info['source']}")
 
+        attr_line = self.get_attribute_line(name, category)
+        if attr_line:
+            lines.append(attr_line)
+
         if not self.is_known(name):
             lines.append("提示：该物品尚未登记详细信息，可能来自秘境/Boss掉落")
 
         return lines
+
+    # 属性字段 -> 展示名
+    _ATTRIBUTE_LABELS = (
+        ("magic_damage", "法伤"),
+        ("physical_damage", "物伤"),
+        ("magic_defense", "法防"),
+        ("physical_defense", "物防"),
+        ("mental_power", "精神力"),
+        ("spiritual_qi", "灵气"),
+        ("blood_qi", "气血"),
+        ("lifespan", "寿命"),
+    )
+
+    def get_attribute_line(self, item_name: str, category: Optional[str] = None) -> str:
+        """装备/功法的属性加成展示（含秘境等系统掉落的动态配置）"""
+        name = str(item_name or "").strip()
+        category = category or self.get_category(name)
+        if category not in (CATEGORY_EQUIPMENT, CATEGORY_TECHNIQUE):
+            return ""
+
+        config = self._resolve_attribute_config(name, category)
+        if not config:
+            return ""
+
+        parts = []
+        for key, label in self._ATTRIBUTE_LABELS:
+            try:
+                value = int(config.get(key) or 0)
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                parts.append(f"{label}+{value}")
+        try:
+            exp_bonus = float(config.get("exp_multiplier") or 0)
+        except (TypeError, ValueError):
+            exp_bonus = 0.0
+        if exp_bonus > 0:
+            parts.append(f"修为倍率+{exp_bonus:.1%}")
+
+        return f"属性加成：{'、'.join(parts)}" if parts else ""
+
+    def _resolve_attribute_config(self, item_name: str, category: str) -> Optional[dict]:
+        """查找物品原始配置：本地配置 -> 秘境掉落表生成的配置"""
+        if not self.config_manager:
+            return None
+        for store_name in ("items_data", "weapons_data"):
+            store = getattr(self.config_manager, store_name, None) or {}
+            if item_name in store:
+                return store[item_name]
+
+        try:
+            from ..managers.rift_manager import RiftManager
+
+            if category == CATEGORY_TECHNIQUE:
+                return RiftManager.get_skill_config(item_name)
+            return RiftManager.get_equipment_config(item_name)
+        except Exception:
+            return None
 
     # ==================== 内部工具 ====================
 

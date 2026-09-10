@@ -8,11 +8,14 @@ from ..data import DataBase
 from ..core import EquipmentManager, PillManager, StorageRingManager
 from ..config_manager import ConfigManager
 from ..models import Player
-from .utils import player_required
+from .utils import player_required, extract_command_args
 
 CMD_SHOW_EQUIPMENT = "我的装备"
-CMD_EQUIP_ITEM = "装备"
+# 「装备」与钓鱼等第三方插件指令冲突，本插件统一使用「修仙装备」
+CMD_EQUIP_ITEM = "修仙装备"
+CMD_EQUIP_ITEM_ALIASES = ("装备物品",)
 CMD_UNEQUIP_ITEM = "卸下"
+CMD_UNEQUIP_ITEM_ALIASES = ("修仙卸下",)
 
 __all__ = ["EquipmentHandler"]
 
@@ -100,7 +103,9 @@ class EquipmentHandler:
     @player_required
     async def handle_equip_item(self, player: Player, event: AstrMessageEvent, item_name: str):
         """装备物品"""
-        item_name = self._normalize_command_argument(event, item_name, CMD_EQUIP_ITEM)
+        item_name = self._normalize_command_argument(
+            event, item_name, (CMD_EQUIP_ITEM,) + CMD_EQUIP_ITEM_ALIASES
+        )
         if not item_name:
             yield event.plain_result(f"请指定要装备的物品名称\n用法：{CMD_EQUIP_ITEM} 物品名称")
             return
@@ -111,7 +116,10 @@ class EquipmentHandler:
             self.config_manager.weapons_data,
         )
         if not item:
-            yield event.plain_result(f"未找到物品：{item_name}")
+            yield event.plain_result(
+                f"未找到物品：{item_name}\n"
+                f"💡 请确认名称是否正确（可用「储物戒」查看背包、「物品信息 <名称>」查询详情）"
+            )
             return
 
         if item.item_type not in {"weapon", "armor", "main_technique", "technique"}:
@@ -159,28 +167,31 @@ class EquipmentHandler:
             yield event.plain_result(f"❌ {message}")
 
     @staticmethod
-    def _normalize_command_argument(event: AstrMessageEvent, argument: str, command: str) -> str:
-        """清理命令参数中可能残留的唤醒词。"""
+    def _normalize_command_argument(event: AstrMessageEvent, argument, commands) -> str:
+        """清理命令参数中可能残留的唤醒词/指令名（支持多个候选指令名）。"""
+        names = [commands] if isinstance(commands, (str, bytes)) else list(commands)
         value = (argument or "").strip()
-        pattern = re.compile(rf"^[^\w\s]*\s*{re.escape(command)}\s*", re.IGNORECASE)
-        value = pattern.sub("", value, count=1).strip()
+        for name in sorted([n for n in names if n], key=len, reverse=True):
+            value = re.sub(
+                rf"^[^\w\s]*\s*{re.escape(name)}\s*", "", value, count=1, flags=re.IGNORECASE
+            ).strip()
         if value:
             return value
 
-        try:
-            message_text = (event.get_message_str() or "").strip()
-        except Exception:
-            message_text = ""
-        return pattern.sub("", message_text, count=1).strip()
+        # 形参未拿到内容时，回退到从原始消息中截取指令名之后的完整文本
+        return extract_command_args(event, names).strip()
 
     @player_required
     async def handle_unequip_item(self, player: Player, event: AstrMessageEvent, slot_or_name: str):
         """卸下装备"""
-        slot_or_name = self._normalize_command_argument(event, slot_or_name, CMD_UNEQUIP_ITEM)
+        slot_or_name = self._normalize_command_argument(
+            event, slot_or_name, (CMD_UNEQUIP_ITEM,) + CMD_UNEQUIP_ITEM_ALIASES
+        )
         if not slot_or_name or slot_or_name.strip() == "":
             yield event.plain_result(
                 f"请指定要卸下的装备\n"
-                f"用法：{CMD_UNEQUIP_ITEM} 武器/防具/心法/功法名称"
+                f"用法：{CMD_UNEQUIP_ITEM} 武器/防具/心法/功法名称\n"
+                f"（也可使用：{CMD_UNEQUIP_ITEM_ALIASES[0]} 武器/防具/心法/功法名称）"
             )
             return
 

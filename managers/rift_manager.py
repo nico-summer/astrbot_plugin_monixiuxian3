@@ -285,6 +285,105 @@ class RiftManager:
                 return category
         return "武器"
 
+    # ========== 秘境功法（掉落表 -> 装备系统配置） ==========
+    # 功法细分类型中含「心法」者可作为主修心法，其余进入功法栏
+    MAIN_TECHNIQUE_KEYWORDS = ("心法",)
+    # 肉身/防御类功法
+    DEFENSIVE_SKILL_KEYWORDS = ("防御", "护体", "体修", "炼体", "肉身", "金刚", "不死", "不灭", "不坏")
+    # 身法/空间/时间类功法
+    AGILITY_SKILL_KEYWORDS = ("身法", "空间", "时间", "挪移", "逍遥", "疾风", "游", "步")
+    # 主修心法的修为倍率（按秘境等级递增）
+    MAIN_TECHNIQUE_EXP_BONUS = {1: 0.02, 2: 0.04, 3: 0.06, 4: 0.08, 5: 0.10, 6: 0.12, 7: 0.15, 8: 0.18}
+
+    # 功法名 -> 生成配置 的缓存
+    _RIFT_SKILL_INDEX = None
+
+    @classmethod
+    def get_skill_index(cls) -> Dict[str, dict]:
+        """秘境掉落功法名 -> 完整功法配置（结果缓存）"""
+        if cls._RIFT_SKILL_INDEX is not None:
+            return cls._RIFT_SKILL_INDEX
+
+        index: Dict[str, dict] = {}
+        for level, level_config in (cls.RIFT_SKILL_TABLE or {}).items():
+            stats = cls.RIFT_EQUIPMENT_STATS.get(level) or cls.RIFT_EQUIPMENT_STATS[1]
+            for entry in (level_config or {}).get("items", []):
+                name = entry.get("name")
+                if not name or name in index:
+                    continue
+                config = cls._build_skill_config(name, entry, level, stats)
+                if config:
+                    index[name] = config
+
+        cls._RIFT_SKILL_INDEX = index
+        return index
+
+    @classmethod
+    def get_skill_config(cls, item_name: str) -> Optional[dict]:
+        """获取秘境掉落功法的完整配置（供装备系统解析装备）"""
+        if not item_name:
+            return None
+        return cls.get_skill_index().get(item_name)
+
+    @classmethod
+    def _build_skill_config(cls, name: str, entry: dict, level: int, stats: dict) -> Optional[dict]:
+        """根据秘境等级与功法细分类型生成装备系统可用的功法配置"""
+        skill_type = str(entry.get("type") or "").strip()
+        if not skill_type:
+            return None
+
+        power = int(stats["power"])
+        rank = stats["rank"]
+
+        if any(keyword in skill_type for keyword in cls.MAIN_TECHNIQUE_KEYWORDS):
+            # 顶级心法：主修后提升修炼效率与能量容量
+            config = {
+                "type": "main_technique",
+                "exp_multiplier": cls.MAIN_TECHNIQUE_EXP_BONUS.get(level, round(0.02 * level, 2)),
+                "mental_power": int(power * 0.5),
+                "spiritual_qi": int(power * 20),
+                "blood_qi": int(power * 20),
+                "magic_defense": max(1, int(power * 0.2)),
+                "physical_defense": max(1, int(power * 0.2)),
+            }
+            focus = "修炼效率"
+        elif any(keyword in skill_type for keyword in cls.DEFENSIVE_SKILL_KEYWORDS):
+            config = {
+                "type": "technique",
+                "physical_defense": int(power * 0.6),
+                "magic_defense": int(power * 0.4),
+                "blood_qi": int(power * 12),
+                "physical_damage": max(1, int(power * 0.15)),
+            }
+            focus = "肉身防御"
+        elif any(keyword in skill_type for keyword in cls.AGILITY_SKILL_KEYWORDS):
+            config = {
+                "type": "technique",
+                "physical_defense": int(power * 0.3),
+                "magic_defense": int(power * 0.3),
+                "mental_power": int(power * 0.4),
+                "physical_damage": max(1, int(power * 0.3)),
+            }
+            focus = "身法"
+        else:
+            config = {
+                "type": "technique",
+                "magic_damage": int(power * 0.7),
+                "physical_damage": int(power * 0.7),
+                "mental_power": int(power * 0.3),
+            }
+            focus = "攻伐"
+
+        config.update({
+            "id": f"rift_skill_{level}_{name}",
+            "name": name,
+            "rank": rank,
+            "subtype": skill_type,
+            "required_level_index": stats["level_index"],
+            "description": f"{rank}级{skill_type}，主修【{focus}】（秘境等级 {level} 掉落）",
+        })
+        return config
+
     # 秘境功法掉落表（低爆率）
     RIFT_SKILL_TABLE = {
         1: {  # 低级秘境

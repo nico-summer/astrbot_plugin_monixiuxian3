@@ -1,6 +1,6 @@
 name: astrbot_plugin_monixiuxian2_niko # 插件唯一标识
 display_name: 模拟修仙v2 # 插件展示名
-desc: 一款为 AstrBot 设计的、功能丰富的放置类修仙游戏插件。让你在聊天群中体验从凡人到大能的修行之路，工作摸鱼、畅聊吹水的同时亦可得道飞升！🆕 v3.5.4 帮助体系升级：新增宗门/组队等 17 个系统详解帮助指令，并补全宗门系统文档（职位、捐献、功法库、宗门秘境）！
-version: v3.5.4
+desc: 一款为 AstrBot 设计的、功能丰富的放置类修仙游戏插件。让你在聊天群中体验从凡人到大能的修行之路，工作摸鱼、畅聊吹水的同时亦可得道飞升！🆕 v3.5.5 修复：赠予指令无法解析物品名、秘境掉落功法无法装备；「装备」指令更名为「修仙装备」，避免与钓鱼等插件冲突！
+version: v3.5.5
 author: n1ko
 repo: https://github.com/nico-summer/astrbot_plugin_monixiuxian2

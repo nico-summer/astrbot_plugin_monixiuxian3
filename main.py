@@ -65,8 +65,11 @@ CMD_START_CULTIVATION = "闭关"
 CMD_END_CULTIVATION = "出关"
 CMD_CHECK_IN = "签到"
 CMD_SHOW_EQUIPMENT = "我的装备"
-CMD_EQUIP_ITEM = "装备"
+# 「装备」与钓鱼等第三方插件指令冲突，本插件统一使用「修仙装备」
+CMD_EQUIP_ITEM = "修仙装备"
+CMD_EQUIP_ITEM_ALIASES = ("装备物品",)
 CMD_UNEQUIP_ITEM = "卸下"
+CMD_UNEQUIP_ITEM_ALIASES = ("修仙卸下",)
 CMD_BREAKTHROUGH = "突破"
 CMD_BREAKTHROUGH_INFO = "突破信息"
 CMD_USE_PILL = "服用丹药"
@@ -951,9 +954,21 @@ class XiuXianPlugin(Star):
         async for r in self.equipment_handler.handle_equip_item(event, item_name):
             yield r
 
+    @filter.command(CMD_EQUIP_ITEM_ALIASES[0], "装备物品（同修仙装备）")
+    @require_whitelist
+    async def handle_equip_item_alias(self, event: AstrMessageEvent, item_name: str = ""):
+        async for r in self.equipment_handler.handle_equip_item(event, item_name):
+            yield r
+
     @filter.command(CMD_UNEQUIP_ITEM, "卸下装备")
     @require_whitelist
     async def handle_unequip_item(self, event: AstrMessageEvent, slot_or_name: str = ""):
+        async for r in self.equipment_handler.handle_unequip_item(event, slot_or_name):
+            yield r
+
+    @filter.command(CMD_UNEQUIP_ITEM_ALIASES[0], "卸下装备（同卸下）")
+    @require_whitelist
+    async def handle_unequip_item_alias(self, event: AstrMessageEvent, slot_or_name: str = ""):
         async for r in self.equipment_handler.handle_unequip_item(event, slot_or_name):
             yield r
 
