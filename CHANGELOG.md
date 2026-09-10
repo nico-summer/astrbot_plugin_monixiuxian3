@@ -34,6 +34,16 @@
 - 修复：`RiftManager` 按秘境等级/品质生成装备配置（攻击、防御、精神力、境界需求），
   `parse_item_from_name()` 增加掉落装备兜底解析
 
+#### 宗门每日任务报错（name 'datetime' is not defined）
+
+- 现象：宗门成员完成秘境探索时抛出 `name 'datetime' is not defined` 导致指令失败，
+  `宗门任务` 面板同样报错
+- 根因：v3.5.0 新增的宗门每日任务（`get_daily_tasks` / `complete_daily_task`）中使用了
+  `datetime.now()`，但 `managers/sect_manager.py` 顶部只导入了 `random` / `time`，
+  缺少 `from datetime import datetime`（同文件另一处是函数内局部导入，因此只有这两个方法报错）
+- 修复：补充模块级 `datetime` 导入
+- 影响路径：秘境探索完成、宗门捐献（≥1000灵石）、历练完成、灵田收获的每日任务自动结算
+
 ### 🆕 功能优化
 
 - **一键服用**（`一键服用` / `批量服用`）：按上限规则服用背包中所有可服丹药
