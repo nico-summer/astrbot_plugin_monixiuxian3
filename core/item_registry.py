@@ -170,9 +170,19 @@ class ItemRegistry:
                 for entry in level_table or []:
                     self._register_drop_entry(entry, CATEGORY_MATERIAL, "秘境探索掉落")
 
-            for level_config in (RiftManager.RIFT_EQUIPMENT_TABLE or {}).values():
-                for entry in (level_config or {}).get("items", []):
-                    self._register_drop_entry(entry, CATEGORY_EQUIPMENT, "秘境探索掉落")
+            # 秘境装备使用掉落表生成的配置，保证品质/细分类型与装备系统一致
+            for entry in RiftManager.get_equipment_index().values():
+                weapon_category = entry.get("weapon_category")
+                self._register(
+                    entry["name"],
+                    CATEGORY_EQUIPMENT,
+                    {
+                        "category": CATEGORY_EQUIPMENT,
+                        "subtype": weapon_category or self._equipment_type_label(entry.get("type")),
+                        "rank": entry.get("rank"),
+                        "source": "秘境探索掉落",
+                    },
+                )
 
             for level_config in (RiftManager.RIFT_SKILL_TABLE or {}).values():
                 for entry in (level_config or {}).get("items", []):
@@ -354,6 +364,10 @@ class ItemRegistry:
             "source": source,
         }
         self._register(name, category, info)
+
+    @staticmethod
+    def _equipment_type_label(item_type: Optional[str]) -> str:
+        return {"weapon": "武器", "armor": "防具", "accessory": "饰品"}.get(item_type or "", "装备")
 
     @staticmethod
     def _normalize_type(raw_type) -> Optional[str]:

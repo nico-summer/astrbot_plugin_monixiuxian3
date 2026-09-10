@@ -256,11 +256,17 @@ class PlayerHandler:
 
         permanent_buff_lines = self.pill_manager.get_permanent_buff_lines(player)
         temporary_buff_lines = self.pill_manager.get_temporary_buff_lines(player)
+        pill_limit_lines = self.pill_manager.get_permanent_pill_limit_lines(player)
+        pill_remaining_lines = self.pill_manager.get_pill_remaining_lines(player)
         reply_msg += "\n【丹药 Buff】\n"
         if permanent_buff_lines:
             reply_msg += "  永久增益：\n" + "".join(f"    • {line}\n" for line in permanent_buff_lines)
         else:
             reply_msg += "  永久增益：无\n"
+        if pill_limit_lines:
+            reply_msg += "  永久属性上限：" + "、".join(pill_limit_lines) + "\n"
+        if pill_remaining_lines:
+            reply_msg += "  丹药可服用情况：\n" + "".join(f"    • {line}\n" for line in pill_remaining_lines)
         if temporary_buff_lines:
             reply_msg += "  临时效果：\n" + "".join(f"    • {line}\n" for line in temporary_buff_lines)
         else:

@@ -8,7 +8,7 @@ from ..data import DataBase
 from ..core import ShopManager, EquipmentManager, PillManager, StorageRingManager
 from ..models import Player
 from ..config_manager import ConfigManager
-from .utils import player_required
+from .utils import player_required, extract_command_args
 
 __all__ = ["ShopHandler"]
 
@@ -132,16 +132,13 @@ class ShopHandler:
 
         item_part, quantity = parse_qty(normalized)
 
-        # 若指令解析只传入物品名（忽略数量），尝试从原始消息再解析一次
+        # 若指令解析只传入物品名（忽略数量），从原始消息重新解析完整参数
         if quantity == 1:
-            try:
-                raw_msg = event.get_message_str().strip()
-                raw_msg = re.sub(r"^[=/！!]?购买(?:物品)?\s*", "", raw_msg, count=1)
-                raw_msg = raw_msg.replace("　", " ")
+            raw_msg = extract_command_args(event, ("购买", "购买物品"))
+            if raw_msg:
+                raw_msg = re.sub(r"\s+", " ", raw_msg).strip()
                 raw_msg = raw_msg.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
                 item_part, quantity = parse_qty(raw_msg)
-            except Exception:
-                pass
 
         item_name = item_part
 
@@ -310,136 +307,13 @@ class ShopHandler:
         return lines
 
     async def _apply_legacy_pill_effects(self, player: Player, item: dict, quantity: int) -> tuple:
-        """应用旧系统丹药效果（items.json中的丹药）
+        """应用旧系统丹药效果（items.json 中的丹药）
 
-        Args:
-            player: 玩家对象
-            item: 物品配置字典
-            quantity: 购买数量
-
-        Returns:
-            (是否成功, 消息)
+        实际结算统一由 PillManager 处理，保证「购买即服用」与「丹药背包服用」结果一致。
         """
-        effects = item.get('data', {}).get('effect', {})
-        if not effects:
-            return False, f"丹药【{item['name']}】无效果配置。"
-
-        effect_msgs = []
-        pill_name = item['name']
-
-        # 处理各种效果（乘以数量）
-        for _ in range(quantity):
-            # 恢复/扣除气血
-            if 'add_hp' in effects:
-                hp_change = effects['add_hp']
-                if player.cultivation_type == "体修":
-                    if player.max_blood_qi <= 0:
-                        player.max_blood_qi = max(100, 50 + player.level_index * 20)
-                    old_blood = player.blood_qi
-                    player.blood_qi = max(0, min(player.max_blood_qi, player.blood_qi + hp_change))
-                    if hp_change > 0:
-                        actual_gain = player.blood_qi - old_blood
-                        effect_msgs.append(f"气血+{actual_gain}" if actual_gain else "气血已满")
-                    else:
-                        effect_msgs.append(f"气血{hp_change}")
-                else:
-                    old_qi = player.spiritual_qi
-                    player.spiritual_qi = max(0, min(player.max_spiritual_qi, player.spiritual_qi + hp_change))
-                    if hp_change > 0:
-                        actual_gain = player.spiritual_qi - old_qi
-                        effect_msgs.append(f"灵气+{actual_gain}" if actual_gain else "灵气已满")
-                    else:
-                        effect_msgs.append(f"灵气{hp_change}")
-
-            # 增加修为
-            if 'add_experience' in effects:
-                exp_gain = effects['add_experience']
-                player.experience += exp_gain
-                effect_msgs.append(f"修为+{exp_gain}")
-
-            # 增加最大气血/灵气上限
-            if 'add_max_hp' in effects:
-                max_hp_gain = effects['add_max_hp']
-                if player.cultivation_type == "体修":
-                    player.max_blood_qi += max_hp_gain
-                    effect_msgs.append(f"最大气血+{max_hp_gain}")
-                else:
-                    player.max_spiritual_qi += max_hp_gain
-                    effect_msgs.append(f"最大灵气+{max_hp_gain}")
-
-            # 增加灵力（映射到法伤）
-            if 'add_spiritual_power' in effects:
-                sp_gain = effects['add_spiritual_power']
-                player.magic_damage += sp_gain
-                effect_msgs.append(f"法伤+{sp_gain}")
-
-            # 增加精神力
-            if 'add_mental_power' in effects:
-                mp_gain = effects['add_mental_power']
-                player.mental_power += mp_gain
-                effect_msgs.append(f"精神力+{mp_gain}")
-
-            # 增加攻击力（映射到物伤）
-            if 'add_attack' in effects:
-                atk_gain = effects['add_attack']
-                player.physical_damage += atk_gain
-                if atk_gain > 0:
-                    effect_msgs.append(f"物伤+{atk_gain}")
-                else:
-                    effect_msgs.append(f"物伤{atk_gain}")
-
-            # 增加防御力（映射到物防）
-            if 'add_defense' in effects:
-                def_gain = effects['add_defense']
-                player.physical_defense += def_gain
-                if def_gain > 0:
-                    effect_msgs.append(f"物防+{def_gain}")
-                else:
-                    effect_msgs.append(f"物防{def_gain}")
-
-            # 增加/扣除灵石
-            if 'add_gold' in effects:
-                gold_change = effects['add_gold']
-                player.gold += gold_change
-                if gold_change > 0:
-                    effect_msgs.append(f"灵石+{gold_change}")
-                else:
-                    effect_msgs.append(f"灵石{gold_change}")
-
-            # 处理突破成功率加成（添加为临时效果，持续1小时）
-            if 'add_breakthrough_bonus' in effects:
-                bonus = effects['add_breakthrough_bonus']
-                import time
-                current_effects = player.get_active_pill_effects()
-                new_effect = {
-                    "pill_name": pill_name,
-                    "subtype": "breakthrough_boost",
-                    "breakthrough_bonus": bonus,
-                    "expiry_time": int(time.time()) + 3600,  # 1小时有效期
-                }
-                current_effects.append(new_effect)
-                player.set_active_pill_effects(current_effects)
-                if bonus > 0:
-                    effect_msgs.append(f"突破成功率+{int(bonus*100)}%(1小时)")
-                else:
-                    effect_msgs.append(f"突破成功率{int(bonus*100)}%(1小时)")
-
-        # 确保属性不为负
-        player.physical_damage = max(0, player.physical_damage)
-        player.magic_damage = max(0, player.magic_damage)
-        player.physical_defense = max(0, player.physical_defense)
-        player.magic_defense = max(0, player.magic_defense)
-        player.mental_power = max(0, player.mental_power)
-        player.spiritual_qi = min(player.spiritual_qi, player.max_spiritual_qi)
-        player.blood_qi = min(player.blood_qi, player.max_blood_qi)
-
-        await self.db.update_player(player)
-
-        # 去重效果消息
-        unique_effects = list(dict.fromkeys(effect_msgs))
-        effects_str = "、".join(unique_effects[:5])  # 最多显示5个效果
-        if len(unique_effects) > 5:
-            effects_str += "..."
-
-        qty_str = f"x{quantity}" if quantity > 1 else ""
-        return True, f"服用【{pill_name}】{qty_str}成功！效果：{effects_str}"
+        return await self.pill_manager.apply_legacy_pill_effects(
+            player,
+            item.get("name", ""),
+            item.get("data", {}) or {},
+            quantity,
+        )

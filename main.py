@@ -51,6 +51,8 @@ CMD_BREAKTHROUGH_INFO = "突破信息"
 CMD_USE_PILL = "服用丹药"
 CMD_SHOW_PILLS = "丹药背包"
 CMD_PILL_INFO = "丹药信息"
+CMD_USE_ALL_PILLS = "一键服用"
+CMD_USE_ALL_PILLS_ALT = "批量服用"
 CMD_PILL_PAVILION = "丹阁"
 CMD_WEAPON_PAVILION = "器阁"
 CMD_TREASURE_PAVILION = "百宝阁"
@@ -947,8 +949,20 @@ class XiuXianPlugin(Star):
 
     @filter.command(CMD_USE_PILL, "服用丹药")
     @require_whitelist
-    async def handle_use_pill(self, event: AstrMessageEvent, pill_name: str = ""):
-        async for r in self.pill_handler.handle_use_pill(event, pill_name):
+    async def handle_use_pill(self, event: AstrMessageEvent, pill_name: str = "", count_text: str = ""):
+        async for r in self.pill_handler.handle_use_pill(event, pill_name, count_text):
+            yield r
+
+    @filter.command(CMD_USE_ALL_PILLS, "一键服用背包中的丹药")
+    @require_whitelist
+    async def handle_use_all_pills(self, event: AstrMessageEvent):
+        async for r in self.pill_handler.handle_use_all_pills(event):
+            yield r
+
+    @filter.command(CMD_USE_ALL_PILLS_ALT, "一键服用背包中的丹药（别名）")
+    @require_whitelist
+    async def handle_use_all_pills_alias(self, event: AstrMessageEvent):
+        async for r in self.pill_handler.handle_use_all_pills(event):
             yield r
 
     @filter.command(CMD_SHOW_PILLS, "查看丹药背包")
@@ -1001,14 +1015,14 @@ class XiuXianPlugin(Star):
 
     @filter.command(CMD_STORE_ITEM, "存入物品到储物戒")
     @require_whitelist
-    async def handle_store_item(self, event: AstrMessageEvent, args: str = ""):
-        async for r in self.storage_ring_handler.handle_store_item(event, args):
+    async def handle_store_item(self, event: AstrMessageEvent, args: str = "", quantity: str = ""):
+        async for r in self.storage_ring_handler.handle_store_item(event, args, quantity):
             yield r
 
     @filter.command(CMD_RETRIEVE_ITEM, "从储物戒取出物品")
     @require_whitelist
-    async def handle_retrieve_item(self, event: AstrMessageEvent, args: str = ""):
-        async for r in self.storage_ring_handler.handle_retrieve_item(event, args):
+    async def handle_retrieve_item(self, event: AstrMessageEvent, args: str = "", quantity: str = ""):
+        async for r in self.storage_ring_handler.handle_retrieve_item(event, args, quantity):
             yield r
 
     @filter.command(CMD_UPGRADE_RING, "升级储物戒")
@@ -1019,8 +1033,8 @@ class XiuXianPlugin(Star):
 
     @filter.command(CMD_DISCARD_ITEM, "丢弃储物戒中的物品")
     @require_whitelist
-    async def handle_discard_item(self, event: AstrMessageEvent, args: str = ""):
-        async for r in self.storage_ring_handler.handle_discard_item(event, args):
+    async def handle_discard_item(self, event: AstrMessageEvent, args: str = "", quantity: str = ""):
+        async for r in self.storage_ring_handler.handle_discard_item(event, args, quantity):
             yield r
 
     @filter.command(CMD_GIFT_ITEM, "赠予物品给其他玩家")
@@ -1055,8 +1069,8 @@ class XiuXianPlugin(Star):
 
     @filter.command(CMD_REFINE_MATERIAL, "炼化材料获得灵石与修为")
     @require_whitelist
-    async def handle_refine_material(self, event: AstrMessageEvent, args: str = ""):
-        async for r in self.storage_ring_handler.handle_refine_material(event, args):
+    async def handle_refine_material(self, event: AstrMessageEvent, args: str = "", quantity: str = ""):
+        async for r in self.storage_ring_handler.handle_refine_material(event, args, quantity):
             yield r
 
     @filter.command(CMD_REFINE_CATALOG, "查看材料炼化图鉴")

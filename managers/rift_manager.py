@@ -171,6 +171,120 @@ class RiftManager:
         },
     }
 
+    # ========== 秘境掉落装备属性模板 ==========
+    # power 为该秘境等级装备的基准数值，参考同境界 weapons.json 的均值，
+    # 保证掉落装备有实用价值但不会超过器阁/百宝阁同境界售卖装备。
+    RIFT_EQUIPMENT_STATS = {
+        1: {"level_index": 0, "rank": "凡品", "power": 14},
+        2: {"level_index": 10, "rank": "灵品", "power": 36},
+        3: {"level_index": 13, "rank": "极品", "power": 120},
+        4: {"level_index": 16, "rank": "传说", "power": 240},
+        5: {"level_index": 20, "rank": "神器", "power": 400},
+        6: {"level_index": 27, "rank": "至尊", "power": 900},
+        7: {"level_index": 30, "rank": "仙品", "power": 1300},
+        8: {"level_index": 31, "rank": "大罗", "power": 1400},
+    }
+
+    # 掉落表 type -> 装备系统类型
+    RIFT_EQUIPMENT_TYPES = {"武器": "weapon", "防具": "armor", "饰品": "accessory"}
+
+    # 主法伤的武器关键词
+    MAGIC_WEAPON_KEYWORDS = ("法杖", "琴", "符", "笔", "幡", "笛", "钟", "镜", "珠")
+
+    # 武器类别推断（仅用于展示）
+    WEAPON_CATEGORY_SUFFIXES = (
+        ("阔刀", "阔刀"), ("重剑", "剑"), ("战戟", "戟"), ("法杖", "杖"),
+        ("长剑", "剑"), ("剑", "剑"), ("刀", "刀"), ("刃", "刀"), ("枪", "枪"),
+        ("棍", "棍"), ("戟", "戟"), ("杖", "杖"), ("琴", "琴"), ("符", "符箓"),
+        ("鼎", "鼎"), ("笔", "笔"), ("匕", "匕首"), ("斧", "斧"), ("弓", "弓"),
+    )
+
+    # 装备名 -> 生成配置 的缓存
+    _RIFT_EQUIPMENT_INDEX = None
+
+    @classmethod
+    def get_equipment_index(cls) -> Dict[str, dict]:
+        """秘境掉落装备名 -> 完整装备配置（结果缓存）"""
+        if cls._RIFT_EQUIPMENT_INDEX is not None:
+            return cls._RIFT_EQUIPMENT_INDEX
+
+        index: Dict[str, dict] = {}
+        for level, level_config in (cls.RIFT_EQUIPMENT_TABLE or {}).items():
+            stats = cls.RIFT_EQUIPMENT_STATS.get(level) or cls.RIFT_EQUIPMENT_STATS[1]
+            for entry in (level_config or {}).get("items", []):
+                name = entry.get("name")
+                if not name or name in index:
+                    continue
+                config = cls._build_equipment_config(name, entry, level, stats)
+                if config:
+                    index[name] = config
+
+        cls._RIFT_EQUIPMENT_INDEX = index
+        return index
+
+    @classmethod
+    def get_equipment_config(cls, item_name: str) -> Optional[dict]:
+        """获取秘境掉落装备的完整配置（供装备系统解析穿戴）"""
+        if not item_name:
+            return None
+        return cls.get_equipment_index().get(item_name)
+
+    @classmethod
+    def _build_equipment_config(cls, name: str, entry: dict, level: int, stats: dict) -> Optional[dict]:
+        """根据秘境等级与品质生成装备配置"""
+        entry_type = entry.get("type", "")
+        if entry_type not in cls.RIFT_EQUIPMENT_TYPES:
+            return None
+
+        power = int(stats["power"])
+        rank = entry.get("quality") or stats["rank"]
+
+        config = {
+            "id": f"rift_equip_{level}_{name}",
+            "name": name,
+            "type": cls.RIFT_EQUIPMENT_TYPES[entry_type],
+            "rank": rank,
+            "required_level_index": stats["level_index"],
+        }
+
+        if entry_type == "武器":
+            is_magic = any(keyword in name for keyword in cls.MAGIC_WEAPON_KEYWORDS)
+            sub_power = int(power * 0.6)
+            config.update({
+                "weapon_category": cls._guess_weapon_category(name),
+                "magic_damage": power if is_magic else sub_power,
+                "physical_damage": sub_power if is_magic else power,
+                "mental_power": int(power * 0.3),
+                "physical_defense": max(1, int(power * 0.1)),
+            })
+            focus = "法伤" if is_magic else "物伤"
+        elif entry_type == "防具":
+            config.update({
+                "physical_defense": int(power * 0.6),
+                "magic_defense": int(power * 0.6),
+                "mental_power": int(power * 0.2),
+            })
+            focus = "防御"
+        else:  # 饰品
+            config.update({
+                "mental_power": int(power * 0.6),
+                "magic_damage": max(1, int(power * 0.15)),
+                "physical_damage": max(1, int(power * 0.15)),
+            })
+            focus = "精神力"
+
+        config["description"] = (
+            f"{rank}级{entry_type}，{focus}基准 {power}（秘境等级 {level} 掉落）"
+        )
+        return config
+
+    @classmethod
+    def _guess_weapon_category(cls, name: str) -> str:
+        for suffix, category in cls.WEAPON_CATEGORY_SUFFIXES:
+            if name.endswith(suffix):
+                return category
+        return "武器"
+
     # 秘境功法掉落表（低爆率）
     RIFT_SKILL_TABLE = {
         1: {  # 低级秘境

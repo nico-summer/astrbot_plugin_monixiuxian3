@@ -5,11 +5,12 @@ from ..data import DataBase
 from ..core import PillManager
 from ..models import Player
 from ..config_manager import ConfigManager
-from .utils import player_required
+from .utils import player_required, extract_command_args
 
 CMD_USE_PILL = "服用丹药"
 CMD_SHOW_PILLS = "丹药背包"
 CMD_PILL_INFO = "丹药信息"
+CMD_USE_ALL_PILLS = "一键服用"
 
 __all__ = ["PillHandler"]
 
@@ -38,43 +39,56 @@ class PillHandler:
         return " / ".join(names)
 
     @player_required
-    async def handle_use_pill(self, player: Player, event: AstrMessageEvent, pill_name: str = ""):
+    async def handle_use_pill(
+        self,
+        player: Player,
+        event: AstrMessageEvent,
+        pill_name: str = "",
+        count_text: str = "",
+    ):
         """处理服用丹药指令
 
         Args:
             player: 玩家对象
             event: 事件对象
-            pill_name: 丹药名称（可包含数量，格式：丹药名 数量）
+            pill_name: 丹药名称（AstrBot 只会绑定第一个 token）
+            count_text: 数量参数（第二个 token，可选）
         """
-        # 检查是否提供了丹药名称
-        if not pill_name or pill_name.strip() == "":
+        # AstrBot 按空格逐个绑定形参，多余 token 会被丢弃，
+        # 因此这里从原始消息重新解析完整的「丹药名 数量」文本。
+        raw_text = extract_command_args(event, CMD_USE_PILL)
+        if not raw_text:
+            raw_text = " ".join(part.strip() for part in (pill_name, count_text) if part and part.strip())
+
+        if not raw_text:
             yield event.plain_result(
                 "请指定要服用的丹药名称！\n"
                 f"💡 使用方法：{CMD_USE_PILL} [丹药名称] [数量]\n"
                 f"💡 例如：{CMD_USE_PILL} 炼气丹\n"
-                f"💡 批量：{CMD_USE_PILL} 凝气丹 15"
+                f"💡 批量：{CMD_USE_PILL} 凝气丹 15\n"
+                f"💡 一键服用全部：{CMD_USE_ALL_PILLS}"
             )
             return
 
-        pill_name = pill_name.strip()
-
         # 解析丹药名称和数量
-        parts = pill_name.split()
+        parts = raw_text.split()
         count = 1
+        pill_name = raw_text
 
         if len(parts) >= 2:
-            # 尝试解析最后一个参数为数量
             try:
-                count = int(parts[-1])
-                if count <= 0:
+                parsed_count = int(parts[-1])
+                if parsed_count <= 0:
                     yield event.plain_result("❌ 数量必须大于0！")
                     return
-                # 如果成功解析，则丹药名是前面的部分
+                count = parsed_count
                 pill_name = " ".join(parts[:-1])
             except ValueError:
-                # 如果解析失败，说明没有指定数量，整个都是丹药名
-                pill_name = " ".join(parts)
+                # 最后一个 token 不是数字，说明整段都是丹药名
+                pill_name = raw_text
                 count = 1
+
+        pill_name = pill_name.strip()
 
         # 先更新临时效果（移除过期的）
         await self.pill_manager.update_temporary_effects(player)
@@ -86,6 +100,12 @@ class PillHandler:
             yield event.plain_result(message)
         else:
             yield event.plain_result(f"❌ {message}")
+
+    @player_required
+    async def handle_use_all_pills(self, player: Player, event: AstrMessageEvent):
+        """一键服用：按各类丹药的叠加与上限规则服用背包中的丹药"""
+        _success, message = await self.pill_manager.use_all_pills(player)
+        yield event.plain_result(message)
 
     @player_required
     async def handle_show_pills(self, player: Player, event: AstrMessageEvent):

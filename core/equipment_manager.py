@@ -37,6 +37,10 @@ class EquipmentManager:
         if not item_config and weapons_data:
             item_config = weapons_data.get(item_name)
 
+        # 秘境等系统掉落但未登记进配置的装备：按掉落表动态生成配置
+        if not item_config:
+            item_config = self._resolve_drop_equipment_config(item_name)
+
         if not item_config:
             return None
 
@@ -93,6 +97,21 @@ class EquipmentManager:
             blood_qi=item_config.get("blood_qi", 0),
             lifespan=item_config.get("lifespan", 0)
         )
+
+    @staticmethod
+    def _resolve_drop_equipment_config(item_name: str) -> Optional[dict]:
+        """解析秘境等系统掉落的装备（未登记进 items.json / weapons.json）
+
+        避免「秘境掉落的装备只能炼化、无法穿戴」的问题。
+        """
+        try:
+            from ..managers.rift_manager import RiftManager
+        except Exception:
+            return None
+        try:
+            return RiftManager.get_equipment_config(item_name)
+        except Exception:
+            return None
 
     def get_equipped_items(self, player: Player, items_data: dict, weapons_data: dict = None) -> List[Item]:
         """获取玩家所有已装备的物品

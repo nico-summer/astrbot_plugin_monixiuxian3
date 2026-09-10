@@ -8,7 +8,7 @@ from ..data import DataBase
 from ..core import StorageRingManager
 from ..config_manager import ConfigManager
 from ..models import Player
-from .utils import player_required
+from .utils import player_required, extract_command_args
 
 CMD_STORAGE_RING = "储物戒"
 CMD_STORE_ITEM = "存入"
@@ -166,16 +166,23 @@ class StorageRingHandler:
         yield event.plain_result("".join(lines))
 
     @player_required
-    async def handle_refine_material(self, player: Player, event: AstrMessageEvent, args: str):
+    async def handle_refine_material(
+        self, player: Player, event: AstrMessageEvent, args: str, quantity: str = ""
+    ):
         """炼化Boss材料，发放灵石和修为。"""
-        if not args or not args.strip():
+        # AstrBot 按空格绑定形参，多余 token（数量/全部）会被丢弃，这里从原始消息重新解析
+        raw_args = extract_command_args(event, CMD_REFINE_MATERIAL).strip()
+        if not raw_args:
+            raw_args = " ".join(part.strip() for part in (args, quantity) if part and part.strip())
+
+        if not raw_args:
             yield event.plain_result(
                 f"用法：{CMD_REFINE_MATERIAL} 材料名 [数量/全部]\n"
                 f"使用 {CMD_REFINE_CATALOG} 查看每种材料的炼化价值"
             )
             return
 
-        parts = args.strip().rsplit(" ", 1)
+        parts = raw_args.rsplit(" ", 1)
         item_name = parts[0].strip()
         quantity_text = parts[1].strip() if len(parts) == 2 else "1"
         if item_name not in MATERIAL_REFINING_VALUES:
@@ -255,7 +262,9 @@ class StorageRingHandler:
         yield event.plain_result("".join(lines))
 
     @player_required
-    async def handle_store_item(self, player: Player, event: AstrMessageEvent, args: str):
+    async def handle_store_item(
+        self, player: Player, event: AstrMessageEvent, args: str, quantity: str = ""
+    ):
         """存入物品到储物戒 - 已禁用手动存入"""
         yield event.plain_result(
             "📦 储物戒说明：\n"
@@ -269,9 +278,12 @@ class StorageRingHandler:
         )
 
     @player_required
-    async def handle_retrieve_item(self, player: Player, event: AstrMessageEvent, args: str):
+    async def handle_retrieve_item(
+        self, player: Player, event: AstrMessageEvent, args: str, quantity: str = ""
+    ):
         """从储物戒取出物品"""
-        if not args or args.strip() == "":
+        args = self._join_args(event, CMD_RETRIEVE_ITEM, args, quantity)
+        if not args:
             yield event.plain_result(
                 f"请指定要取出的物品\n"
                 f"用法：{CMD_RETRIEVE_ITEM} 物品名 [数量]\n"
@@ -279,7 +291,6 @@ class StorageRingHandler:
             )
             return
 
-        args = args.strip()
         parts = args.rsplit(" ", 1)
 
         # 解析物品名和数量
@@ -303,9 +314,12 @@ class StorageRingHandler:
             yield event.plain_result(f"❌ {message}")
 
     @player_required
-    async def handle_discard_item(self, player: Player, event: AstrMessageEvent, args: str):
+    async def handle_discard_item(
+        self, player: Player, event: AstrMessageEvent, args: str, quantity: str = ""
+    ):
         """丢弃储物戒中的物品"""
-        if not args or args.strip() == "":
+        args = self._join_args(event, CMD_DISCARD_ITEM, args, quantity)
+        if not args:
             yield event.plain_result(
                 f"请指定要丢弃的物品\n"
                 f"用法：{CMD_DISCARD_ITEM} 物品名 [数量]\n"
@@ -314,7 +328,6 @@ class StorageRingHandler:
             )
             return
 
-        args = args.strip()
         parts = args.rsplit(" ", 1)
 
         # 解析物品名和数量
@@ -582,6 +595,14 @@ class StorageRingHandler:
             yield event.plain_result(f"✅ {message}")
         else:
             yield event.plain_result(f"❌ {message}")
+
+    @staticmethod
+    def _join_args(event, command_name: str, *parts: str) -> str:
+        """拼出指令后的完整参数文本（兼容 AstrBot 只绑定首个 token 的行为）"""
+        raw = extract_command_args(event, command_name).strip()
+        if raw:
+            return raw
+        return " ".join(part.strip() for part in parts if part and part.strip())
 
     def _item_label(self, item_name: str) -> str:
         """物品名后缀信息，例如（武器·凡品）、（可炼化⚗️）"""

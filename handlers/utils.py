@@ -241,6 +241,49 @@ _AT_TEXT_PATTERNS = (
 )
 
 
+def extract_command_args(event, command_names) -> str:
+    """从原始消息中提取指令名之后的完整参数文本。
+
+    AstrBot 的指令参数是按空格逐个绑定到函数形参的，函数没声明的多余 token 会被丢弃
+    （例如 ``/服用丹药 凝气丹 10`` 只会把「凝气丹」传进第一个形参，数量「10」被吞掉）。
+    需要完整参数的指令（数量、全部、多段参数等）可通过本函数从原始消息重新解析。
+
+    Args:
+        event: AstrMessageEvent
+        command_names: 指令名（str 或可迭代的多个候选名，如别名）
+
+    Returns:
+        指令名之后的参数文本（已去除全角空格），无法解析时返回空字符串
+    """
+    raw = ""
+    getter = getattr(event, "get_message_str", None)
+    if callable(getter):
+        try:
+            raw = getter() or ""
+        except Exception:
+            raw = ""
+    if not raw:
+        raw = str(getattr(event, "message_str", "") or "")
+
+    raw = raw.replace("\u3000", " ").strip()
+    if not raw:
+        return ""
+
+    names = [command_names] if isinstance(command_names, (str, bytes)) else list(command_names)
+    for name in sorted(names, key=len, reverse=True):
+        if not name:
+            continue
+        stripped = re.sub(
+            rf"^[=/！!，,。.]*\s*{re.escape(str(name))}\s*",
+            "",
+            raw,
+            count=1,
+        )
+        if stripped != raw:
+            return stripped.strip()
+    return raw
+
+
 def _iter_message_components(event):
     """遍历消息链组件（兼容缺失 message_obj 的老版本/适配器）"""
     message_obj = getattr(event, "message_obj", None)
