@@ -62,7 +62,12 @@ class TeamManager:
         await self.db.conn.commit()
 
         player_name = player.user_name if player.user_name else f"道友{leader_id[:6]}"
-        return True, f"✅ 队伍创建成功！队长：{player_name}\n💡 使用 /邀请入队 @某人 邀请队员", team_id
+        return True, (
+            f"✅ 队伍创建成功！队长：{player_name}\n"
+            f"🆔 队伍编号：{team_id}\n"
+            f"💡 邀请队员：/邀请入队 @某人\n"
+            f"💡 其他道友可发送 /加入队伍 {team_id} 主动加入"
+        ), team_id
 
     async def invite_member(self, team_id: int, inviter_id: str, invitee_id: str) -> Tuple[bool, str]:
         """
@@ -127,6 +132,74 @@ class TeamManager:
         invitee_name = invitee.user_name if invitee.user_name else f"道友{invitee_id[:6]}"
 
         return True, f"✅ 已向 {invitee_name} 发送组队邀请！\n💡 对方可使用 /接受组队 加入队伍（{self.INVITATION_EXPIRE_TIME//60}分钟内有效）"
+
+    async def get_open_team_id_by_leader(self, leader_id: str) -> Optional[int]:
+        """根据队长ID查找其待命中的队伍编号"""
+        async with self.db.conn.execute(
+            "SELECT team_id FROM teams WHERE leader_id = ? AND status = ? ORDER BY team_id DESC LIMIT 1",
+            (leader_id, self.STATUS_WAITING)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        try:
+            return int(row["team_id"])
+        except (TypeError, IndexError, KeyError):
+            return int(row[0])
+
+    async def join_team(self, user_id: str, team_id: int) -> Tuple[bool, str]:
+        """玩家主动加入指定队伍（无需邀请）
+
+        Args:
+            user_id: 申请加入的玩家ID
+            team_id: 目标队伍编号
+
+        Returns:
+            (成功标志, 消息)
+        """
+        player = await self.db.get_player_by_id(user_id)
+        if not player:
+            return False, "❌ 你还未踏入修仙之路！"
+
+        team = await self._get_team_by_id(team_id)
+        if not team:
+            return False, f"❌ 未找到编号为 {team_id} 的队伍，请确认编号是否正确"
+
+        if team["status"] != self.STATUS_WAITING:
+            return False, "❌ 该队伍正在探索中，无法加入！"
+
+        if team["leader_id"] == user_id:
+            return False, "❌ 你已经是这个队伍的队长了！"
+
+        existing_team = await self._get_player_team(user_id)
+        if existing_team:
+            return False, "❌ 你已经在一个队伍中了！请先使用 /离开队伍"
+
+        if await self._is_team_member(team_id, user_id):
+            return False, "❌ 你已经是这个队伍的成员了！"
+
+        member_count = await self._get_team_member_count(team_id)
+        if member_count >= self.MAX_TEAM_SIZE:
+            return False, f"❌ 队伍已满（{self.MAX_TEAM_SIZE}人）！"
+
+        current_time = int(time.time())
+        await self.db.conn.execute(
+            "INSERT INTO team_members (team_id, user_id, join_time) VALUES (?, ?, ?)",
+            (team_id, user_id, current_time)
+        )
+        # 清理可能残留的同队邀请，避免接受后重复加入
+        await self.db.conn.execute(
+            "DELETE FROM team_invitations WHERE team_id = ? AND invitee_id = ?",
+            (team_id, user_id)
+        )
+        await self.db.conn.commit()
+
+        leader = await self.db.get_player_by_id(team["leader_id"])
+        leader_name = leader.user_name if leader and leader.user_name else f"道友{team['leader_id'][:6]}"
+
+        team_info = await self.get_team_info(user_id)
+        suffix = f"\n\n{team_info['display']}" if team_info else ""
+        return True, f"✅ 已加入队伍！队长：{leader_name}{suffix}"
 
     async def accept_invitation(self, user_id: str) -> Tuple[bool, str]:
         """
@@ -426,6 +499,7 @@ class TeamManager:
         display = f"""
 🤝 队伍信息
 ━━━━━━━━━━━━━━━
+队伍编号：{team_id}
 状态：{status_text}
 人数：{len(members)}/{self.MAX_TEAM_SIZE}
 队伍平均等级：{avg_level}

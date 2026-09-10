@@ -1,11 +1,10 @@
 # handlers/impart_pk_handlers.py
 """传承PK处理器"""
-import re
 from astrbot.api.event import AstrMessageEvent
 from ..data import DataBase
 from ..managers.impart_pk_manager import ImpartPkManager
 from ..models import Player
-from .utils import player_required
+from .utils import player_required, resolve_target_user_id
 
 __all__ = ["ImpartPkHandlers"]
 
@@ -21,7 +20,7 @@ class ImpartPkHandlers:
     async def handle_impart_challenge(self, player: Player, event: AstrMessageEvent, target_info: str = ""):
         """发起传承挑战"""
         # 解析目标
-        target_id = self._extract_user_id(target_info)
+        target_id = await resolve_target_user_id(self.db, event, target_info)
         if not target_id:
             yield event.plain_result(
                 "⚔️ 传承挑战\n"
@@ -80,16 +79,3 @@ class ImpartPkHandlers:
         
         yield event.plain_result("\n".join(lines))
     
-    def _extract_user_id(self, msg: str) -> str:
-        """从消息中提取用户ID"""
-        if not msg:
-            return ""
-        # 匹配 @xxx 或纯数字
-        at_match = re.search(r'\[CQ:at,qq=(\d+)\]', msg)
-        if at_match:
-            return at_match.group(1)
-        # 纯数字
-        num_match = re.search(r'(\d{5,12})', msg)
-        if num_match:
-            return num_match.group(1)
-        return ""

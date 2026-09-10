@@ -1,6 +1,7 @@
 # handlers/utils.py
 # 通用工具函数和装饰器
 
+import re
 import time
 from functools import wraps
 from typing import Callable, Coroutine, AsyncGenerator
@@ -224,3 +225,207 @@ async def _check_loan_status(db, player: Player) -> dict:
         
     except Exception:
         return None
+
+
+# ==================== @ 目标玩家解析 ====================
+
+# At 组件上可能出现的用户标识字段（不同适配器命名不同）
+_AT_ID_ATTRS = ("qq", "target", "uin", "user_id", "openid", "id")
+
+# 原始消息中 @ 的文本形式：CQ 码 / XML 标签
+_AT_TEXT_PATTERNS = (
+    r"\[CQ:at,[^\]]*?\bqq=(\d+)",
+    r"\[CQ:at,[^\]]*?\buser_id=([\w-]+)",
+    r"<at[^>]*?\bqq=[\"']?([\w-]+)",
+    r"<at[^>]*?\buser_id=[\"']?([\w-]+)",
+)
+
+
+def _iter_message_components(event):
+    """遍历消息链组件（兼容缺失 message_obj 的老版本/适配器）"""
+    message_obj = getattr(event, "message_obj", None)
+    chain = getattr(message_obj, "message", None)
+    if chain is None:
+        getter = getattr(event, "get_messages", None)
+        if callable(getter):
+            try:
+                chain = getter()
+            except Exception:
+                chain = None
+    return list(chain or [])
+
+
+def _is_at_component(component) -> bool:
+    if component is None:
+        return False
+    if type(component).__name__ == "At":
+        return True
+    return any(hasattr(component, attr) for attr in ("qq", "uin"))
+
+
+def _iter_raw_texts(event):
+    """收集可能包含 CQ 码 / at 标签的原始文本"""
+    texts = []
+    message_str = getattr(event, "get_message_str", None)
+    if callable(message_str):
+        try:
+            texts.append(message_str() or "")
+        except Exception:
+            pass
+    texts.append(str(getattr(event, "message_str", "") or ""))
+    raw = getattr(event, "raw_message", None)
+    if raw is not None:
+        texts.append(str(raw))
+    for component in _iter_message_components(event):
+        text = getattr(component, "text", None)
+        if isinstance(text, str):
+            texts.append(text)
+    return [t for t in texts if t]
+
+
+def extract_at_ids(event) -> list:
+    """从消息链与原始消息中提取所有 @ 到的用户ID（去重保序）"""
+    ids = []
+
+    def _add(value):
+        text = str(value or "").strip().lstrip("@")
+        if text and text not in ids:
+            ids.append(text)
+
+    for component in _iter_message_components(event):
+        if not _is_at_component(component):
+            continue
+        for attr in _AT_ID_ATTRS:
+            value = getattr(component, attr, None)
+            if value is None:
+                continue
+            if str(value).strip():
+                _add(value)
+                break
+
+    for text in _iter_raw_texts(event):
+        for pattern in _AT_TEXT_PATTERNS:
+            for match in re.finditer(pattern, text):
+                _add(match.group(1))
+
+    return ids
+
+
+def extract_name_candidate(event, arg: str = "") -> str:
+    """从参数或消息文本中提取可能的道号/昵称（去掉@与表情）"""
+    candidates = []
+
+    raw_arg = str(arg or "").strip()
+    if raw_arg:
+        candidates.append(raw_arg.lstrip("@").strip())
+
+    for component in _iter_message_components(event):
+        if _is_at_component(component):
+            name = getattr(component, "name", None) or getattr(component, "display", None)
+            if name:
+                candidates.append(str(name).strip())
+
+    message_str = ""
+    getter = getattr(event, "get_message_str", None)
+    if callable(getter):
+        try:
+            message_str = getter() or ""
+        except Exception:
+            message_str = ""
+    for match in re.finditer(r"@([^@\s\[\]<>=:]+)", message_str):
+        candidates.append(match.group(1).strip())
+
+    for candidate in candidates:
+        if not candidate or len(candidate) > 20:
+            continue
+        if any(ch in candidate for ch in "[]<>=:,\n\t"):
+            continue
+        if candidate.isdigit():
+            continue
+        return candidate
+    return ""
+
+
+async def _find_user_id_by_name(db, name: str) -> str:
+    """按道号精确/模糊查找玩家ID（结果唯一时才返回）"""
+    if not name:
+        return ""
+
+    getter = getattr(db, "get_player_by_name", None)
+    if callable(getter):
+        try:
+            player = await getter(name)
+        except Exception:
+            player = None
+        if player:
+            return player.user_id
+
+    rows = []
+    try:
+        async with db.conn.execute(
+            "SELECT user_id FROM players WHERE user_name = ? LIMIT 2", (name,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+        if not rows:
+            async with db.conn.execute(
+                "SELECT user_id FROM players WHERE user_name LIKE ? LIMIT 3",
+                (f"%{name}%",),
+            ) as cursor:
+                rows = await cursor.fetchall()
+    except Exception:
+        return ""
+
+    if len(rows) == 1:
+        row = rows[0]
+        try:
+            return str(row["user_id"])
+        except (TypeError, IndexError, KeyError):
+            return str(row[0])
+    return ""
+
+
+async def _player_exists(db, user_id: str) -> bool:
+    if not user_id:
+        return False
+    try:
+        return bool(await db.get_player_by_id(str(user_id)))
+    except Exception:
+        return False
+
+
+async def resolve_target_user_id(db, event, arg: str = "") -> str:
+    """解析指令中的目标玩家ID。
+
+    依次尝试（每一项都会校验玩家是否存在）：
+    1. 消息链中的 At 组件（AstrBot 标准做法）
+    2. 原始消息中的 CQ 码 / at 标签
+    3. 指令参数中的纯数字ID
+    4. 道号/昵称（精确 -> 模糊），解决部分适配器 @ 只留下名字的情况
+
+    若 @ 到了数据库中不存在的玩家，则原样返回该ID，由调用方给出提示。
+
+    Args:
+        db: DataBase 实例
+        event: AstrMessageEvent
+        arg: 指令参数字符串
+
+    Returns:
+        解析出的用户ID，解析失败返回空字符串
+    """
+    at_candidates = extract_at_ids(event)
+    for candidate in at_candidates:
+        if await _player_exists(db, candidate):
+            return candidate
+
+    raw_arg = str(arg or "").strip()
+    for digits in re.findall(r"\d+", raw_arg):
+        if await _player_exists(db, digits):
+            return digits
+
+    name = extract_name_candidate(event, raw_arg)
+    if name:
+        user_id = await _find_user_id_by_name(db, name)
+        if user_id:
+            return user_id
+
+    return at_candidates[0] if at_candidates else ""

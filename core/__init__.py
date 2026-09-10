@@ -6,5 +6,14 @@ from .breakthrough_manager import BreakthroughManager
 from .pill_manager import PillManager
 from .shop_manager import ShopManager
 from .storage_ring_manager import StorageRingManager
+from .item_registry import ItemRegistry
 
-__all__ = ["CultivationManager", "EquipmentManager", "BreakthroughManager", "PillManager", "ShopManager", "StorageRingManager"]
+__all__ = [
+    "CultivationManager",
+    "EquipmentManager",
+    "BreakthroughManager",
+    "PillManager",
+    "ShopManager",
+    "StorageRingManager",
+    "ItemRegistry",
+]

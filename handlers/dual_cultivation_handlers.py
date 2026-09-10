@@ -1,11 +1,10 @@
 # handlers/dual_cultivation_handlers.py
 """双修处理器"""
-import re
 from astrbot.api.event import AstrMessageEvent
 from ..data import DataBase
 from ..managers.dual_cultivation_manager import DualCultivationManager
 from ..models import Player
-from .utils import player_required
+from .utils import player_required, resolve_target_user_id
 
 __all__ = ["DualCultivationHandlers"]
 
@@ -20,7 +19,7 @@ class DualCultivationHandlers:
     @player_required
     async def handle_dual_request(self, player: Player, event: AstrMessageEvent, target: str = ""):
         """发起双修"""
-        target_id = self._extract_user_id(target)
+        target_id = await resolve_target_user_id(self.db, event, target)
         if not target_id:
             yield event.plain_result(
                 "💕 双修系统\n"
@@ -47,14 +46,3 @@ class DualCultivationHandlers:
         success, msg = await self.mgr.reject_request(player.user_id)
         yield event.plain_result(msg)
     
-    def _extract_user_id(self, msg: str) -> str:
-        """提取用户ID"""
-        if not msg:
-            return ""
-        at_match = re.search(r'\[CQ:at,qq=(\d+)\]', msg)
-        if at_match:
-            return at_match.group(1)
-        num_match = re.search(r'(\d{5,12})', msg)
-        if num_match:
-            return num_match.group(1)
-        return ""

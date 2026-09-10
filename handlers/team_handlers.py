@@ -3,7 +3,7 @@ from astrbot.api.event import AstrMessageEvent
 from ..managers.team_manager import TeamManager
 from ..managers.rift_manager import RiftManager
 from ..data.data_manager import DataBase
-import re
+from .utils import resolve_target_user_id, extract_at_ids
 
 
 class TeamHandlers:
@@ -24,17 +24,14 @@ class TeamHandlers:
         """邀请队员"""
         user_id = event.get_sender_id()
 
-        # 调试日志
-        from astrbot.api import logger
-        logger.info(f"[组队] 邀请指令 - message_str: {event.message_str}")
-        logger.info(f"[组队] 邀请指令 - target参数: {target}")
-
-        # 提取目标用户ID
-        target_id = self._extract_user_id(event, target)
-        logger.info(f"[组队] 提取到的target_id: {target_id}")
+        # 提取目标用户ID（兼容 At 组件/CQ码/纯数字ID/道号）
+        target_id = await resolve_target_user_id(self.db, event, target)
 
         if not target_id:
-            yield event.plain_result("❌ 请@要邀请的玩家，例如：/邀请入队 @某人")
+            yield event.plain_result(
+                "❌ 没识别到要邀请的玩家\n"
+                "用法：/邀请入队 @某人 或 /邀请入队 道号"
+            )
             return
 
         # 获取用户的队伍
@@ -79,17 +76,14 @@ class TeamHandlers:
         """踢出队员"""
         user_id = event.get_sender_id()
 
-        # 调试日志
-        from astrbot.api import logger
-        logger.info(f"[组队] 踢人指令 - message_str: {event.message_str}")
-        logger.info(f"[组队] 踢人指令 - target参数: {target}")
-
-        # 提取目标用户ID
-        target_id = self._extract_user_id(event, target)
-        logger.info(f"[组队] 提取到的target_id: {target_id}")
+        # 提取目标用户ID（兼容 At 组件/CQ码/纯数字ID/道号）
+        target_id = await resolve_target_user_id(self.db, event, target)
 
         if not target_id:
-            yield event.plain_result("❌ 请@要踢出的玩家，例如：/踢出队伍 @某人")
+            yield event.plain_result(
+                "❌ 没识别到要踢出的玩家\n"
+                "用法：/踢出队伍 @某人 或 /踢出队伍 道号"
+            )
             return
 
         # 获取用户的队伍
@@ -192,17 +186,14 @@ class TeamHandlers:
             yield event.plain_result("❌ 请输入物品编号和目标玩家，例如：/分配物品 1 @某人")
             return
 
-        # 调试日志
-        from astrbot.api import logger
-        logger.info(f"[组队] 分配物品指令 - message_str: {event.message_str}")
-        logger.info(f"[组队] 分配物品指令 - target参数: {target}")
-
-        # 提取目标用户ID
-        target_id = self._extract_user_id(event, target)
-        logger.info(f"[组队] 提取到的target_id: {target_id}")
+        # 提取目标用户ID（兼容 At 组件/CQ码/纯数字ID/道号）
+        target_id = await resolve_target_user_id(self.db, event, target)
 
         if not target_id:
-            yield event.plain_result("❌ 请@要分配给的玩家，例如：/分配物品 1 @某人")
+            yield event.plain_result(
+                "❌ 没识别到要分配的玩家\n"
+                "用法：/分配物品 <编号> @某人"
+            )
             return
 
         # 获取用户的队伍
@@ -270,29 +261,35 @@ class TeamHandlers:
         icon = {"丹药": "🔥", "装备": "⚔️", "功法": "📜", "材料": "📦"}.get(item_type, "📦")
         yield event.plain_result(f"✅ 已将 {icon}{item_name} x{quantity} 分配给 {target_name}")
 
-    def _extract_user_id(self, event: AstrMessageEvent, target_arg: str) -> str:
-        """
-        从消息中提取用户ID
+    async def handle_join_team(self, event: AstrMessageEvent, target: str = ""):
+        """主动加入队伍（支持队伍编号 或 @队长）"""
+        user_id = event.get_sender_id()
+        raw_target = (target or "").strip()
 
-        优先级：
-        1. 从完整消息字符串中提取At
-        2. 从target_arg参数提取
-        """
-        # 尝试从完整消息中提取At（包括原始消息和参数）
-        full_message = event.message_str
+        team_id = None
+        has_at = bool(extract_at_ids(event))
 
-        # CQ码格式：[CQ:at,qq=123456]
-        at_match = re.search(r'\[CQ:at,qq=(\d+)\]', full_message)
-        if at_match:
-            return at_match.group(1)
+        if raw_target.isdigit() and not has_at:
+            # 纯数字：按队伍编号处理
+            team_id = int(raw_target)
+        else:
+            # @队长 或 直接输入队长道号
+            leader_id = await resolve_target_user_id(self.db, event, raw_target)
+            if leader_id:
+                team_id = await self.team_mgr.get_open_team_id_by_leader(leader_id)
+                if not team_id:
+                    leader = await self.db.get_player_by_id(leader_id)
+                    leader_name = leader.user_name if leader and leader.user_name else f"道友{leader_id[:6]}"
+                    yield event.plain_result(f"❌ 【{leader_name}】当前没有可加入的队伍（未创建队伍或正在探索中）")
+                    return
 
-        # 尝试从target_arg提取（如果用户直接输入了QQ号）
-        if target_arg:
-            # 移除@符号和空格
-            clean_target = target_arg.strip().replace('@', '').strip()
-            # 提取5-12位数字（QQ号范围）
-            num_match = re.search(r'(\d{5,12})', clean_target)
-            if num_match:
-                return num_match.group(1)
+        if not team_id:
+            yield event.plain_result(
+                "❌ 请提供队伍编号或@队长\n"
+                "用法：/加入队伍 3 或 /加入队伍 @队长\n"
+                "💡 队伍编号可通过 /队伍信息 或创建队伍时获得"
+            )
+            return
 
-        return ""
+        success, msg = await self.team_mgr.join_team(user_id, team_id)
+        yield event.plain_result(msg)

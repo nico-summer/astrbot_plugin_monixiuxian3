@@ -76,9 +76,10 @@ __all__ = ["StorageRingHandler"]
 class StorageRingHandler:
     """储物戒系统处理器"""
 
-    def __init__(self, db: DataBase, config_manager: ConfigManager):
+    def __init__(self, db: DataBase, config_manager: ConfigManager, item_registry=None):
         self.db = db
         self.config_manager = config_manager
+        self.item_registry = item_registry
         self.storage_ring_manager = StorageRingManager(db, config_manager)
 
     @player_required
@@ -105,10 +106,11 @@ class StorageRingHandler:
                 if cat_items:
                     lines.append(f"【{category}】\n")
                     for item_name, count in cat_items:
+                        label = self._item_label(item_name)
                         if count > 1:
-                            lines.append(f"  · {item_name}×{count}\n")
+                            lines.append(f"  · {item_name}×{count}{label}\n")
                         else:
-                            lines.append(f"  · {item_name}\n")
+                            lines.append(f"  · {item_name}{label}\n")
         else:
             lines.append("【存储物品】空\n")
 
@@ -123,6 +125,7 @@ class StorageRingHandler:
         lines.append(f"搜索：{CMD_SEARCH_ITEM} 关键词\n")
         lines.append(f"炼化：{CMD_REFINE_MATERIAL} 材料名 [数量/全部]\n")
         lines.append(f"一键炼化：{CMD_REFINE_ALL}（炼化全部可炼化材料）\n")
+        lines.append(f"物品信息：物品信息 物品名（查看类型/品质/用途）\n")
         lines.append(f"升级：{CMD_UPGRADE_RING} 储物戒名")
 
         yield event.plain_result("".join(lines))
@@ -580,40 +583,64 @@ class StorageRingHandler:
         else:
             yield event.plain_result(f"❌ {message}")
 
+    def _item_label(self, item_name: str) -> str:
+        """物品名后缀信息，例如（武器·凡品）、（可炼化⚗️）"""
+        tags = []
+
+        if self.item_registry:
+            brief = self.item_registry.get_brief(item_name)
+            # 与所在栏目名重复的信息不再展示（如【材料】下的“材料”）
+            if brief and brief != self.item_registry.get_category(item_name):
+                tags.append(brief)
+
+        if item_name in MATERIAL_REFINING_VALUES:
+            tags.append("可炼化⚗️")
+
+        return f"（{'·'.join(tags)}）" if tags else ""
+
+    def _resolve_category(self, item_name: str) -> str:
+        """判断物品所属分类：统一索引 -> 关键词/配置 -> 后缀推断 -> 其他"""
+        registry = self.item_registry
+        if registry and registry.is_known(item_name):
+            return registry.get_category(item_name)
+
+        legacy = self._legacy_category(item_name)
+        if legacy != "其他":
+            return legacy
+
+        if registry:
+            guessed = registry.get_category(item_name)
+            if guessed != "其他":
+                return guessed
+        return "其他"
+
+    def _legacy_category(self, item_name: str) -> str:
+        """旧的关键词 + items.json 类型判定（作为索引兜底）"""
+        for category, keywords in ITEM_CATEGORIES.items():
+            if category == "其他":
+                continue
+            for keyword in keywords:
+                if keyword in item_name or item_name in keyword:
+                    return category
+
+        item_config = self.config_manager.items_data.get(item_name, {})
+        item_type = item_config.get("type", "")
+
+        if item_type in ["weapon", "武器", "armor", "防具", "法器", "饰品"]:
+            return "装备"
+        if item_type in ["technique", "功法", "main_technique"]:
+            return "功法"
+        if item_type in ["material", "材料"]:
+            return "材料"
+        return "其他"
+
     def _categorize_items(self, items: dict) -> dict:
         """将物品按分类整理"""
         result = {cat: [] for cat in ITEM_CATEGORIES.keys()}
-        
         for item_name, count in items.items():
-            categorized = False
-            for category, keywords in ITEM_CATEGORIES.items():
-                if category == "其他":
-                    continue
-                # 检查物品名是否包含分类关键词
-                for keyword in keywords:
-                    if keyword in item_name or item_name in keyword:
-                        result[category].append((item_name, count))
-                        categorized = True
-                        break
-                if categorized:
-                    break
-            
-            # 根据配置判断物品类型
-            if not categorized:
-                item_config = self.config_manager.items_data.get(item_name, {})
-                item_type = item_config.get("type", "")
-                
-                if item_type in ["weapon", "武器"]:
-                    result["装备"].append((item_name, count))
-                elif item_type in ["armor", "防具"]:
-                    result["装备"].append((item_name, count))
-                elif item_type in ["technique", "功法", "main_technique"]:
-                    result["功法"].append((item_name, count))
-                elif item_type in ["material", "材料"]:
-                    result["材料"].append((item_name, count))
-                else:
-                    result["其他"].append((item_name, count))
-        
+            category = self._resolve_category(item_name)
+            result.setdefault(category, []).append((item_name, count))
+
         # 移除空分类
         return {k: v for k, v in result.items() if v}
 
@@ -643,7 +670,8 @@ class StorageRingHandler:
         
         lines = [f"=== 搜索结果：{keyword} ===\n"]
         for item_name, count in matched:
-            lines.append(f"  · {item_name}×{count}\n")
+            label = self._item_label(item_name)
+            lines.append(f"  · {item_name}×{count}{label}\n")
         lines.append(f"\n共找到 {len(matched)} 种物品")
         
         yield event.plain_result("".join(lines))

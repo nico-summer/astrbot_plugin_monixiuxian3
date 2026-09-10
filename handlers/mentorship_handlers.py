@@ -1,12 +1,11 @@
 # handlers/mentorship_handlers.py
 """师徒系统处理器"""
-import re
 from astrbot.api.event import AstrMessageEvent
 from ..data import DataBase
 from ..managers.mentorship_manager import MentorshipManager
 from ..models import Player
 from ..config_manager import ConfigManager
-from .utils import player_required
+from .utils import player_required, resolve_target_user_id, extract_at_ids
 
 __all__ = ["MentorshipHandlers"]
 
@@ -22,7 +21,7 @@ class MentorshipHandlers:
     @player_required
     async def handle_become_mentor(self, player: Player, event: AstrMessageEvent, target: str = ""):
         """收徒（邀请）"""
-        target_id = self._extract_user_id(target)
+        target_id = await resolve_target_user_id(self.db, event, target)
         if not target_id:
             yield event.plain_result(
                 "👨‍🏫 收徒系统\n"
@@ -57,7 +56,7 @@ class MentorshipHandlers:
     @player_required
     async def handle_become_apprentice(self, player: Player, event: AstrMessageEvent, target: str = ""):
         """拜师（请求）"""
-        target_id = self._extract_user_id(target)
+        target_id = await resolve_target_user_id(self.db, event, target)
         if not target_id:
             yield event.plain_result(
                 "🙏 拜师系统\n"
@@ -93,8 +92,8 @@ class MentorshipHandlers:
     async def handle_accept_mentorship(self, player: Player, event: AstrMessageEvent, target: str = ""):
         """接受拜师请求"""
         # 如果有@人，则接受该人的请求
-        if target:
-            target_id = self._extract_user_id(target)
+        if (target or "").strip() or extract_at_ids(event):
+            target_id = await resolve_target_user_id(self.db, event, target)
             if not target_id:
                 yield event.plain_result("请@要接受的对象")
                 return
@@ -113,8 +112,8 @@ class MentorshipHandlers:
     async def handle_reject_mentorship(self, player: Player, event: AstrMessageEvent, target: str = ""):
         """拒绝拜师请求"""
         # 如果有@人，则拒绝该人的请求
-        if target:
-            target_id = self._extract_user_id(target)
+        if (target or "").strip() or extract_at_ids(event):
+            target_id = await resolve_target_user_id(self.db, event, target)
             if not target_id:
                 yield event.plain_result("请@要拒绝的对象")
                 return
@@ -138,7 +137,7 @@ class MentorshipHandlers:
     @player_required
     async def handle_initiation(self, player: Player, event: AstrMessageEvent, target: str = ""):
         """灌顶"""
-        target_id = self._extract_user_id(target)
+        target_id = await resolve_target_user_id(self.db, event, target)
         if not target_id:
             yield event.plain_result(
                 "✨ 灌顶系统\n"
@@ -163,7 +162,7 @@ class MentorshipHandlers:
     @player_required
     async def handle_expel(self, player: Player, event: AstrMessageEvent, target: str = ""):
         """逐出师门"""
-        target_id = self._extract_user_id(target)
+        target_id = await resolve_target_user_id(self.db, event, target)
         if not target_id:
             yield event.plain_result("请指定要逐出的徒弟\n💡 使用：逐出师门 @徒弟")
             return
@@ -202,19 +201,3 @@ class MentorshipHandlers:
         else:
             yield event.plain_result(msg)
 
-    def _extract_user_id(self, msg: str) -> str:
-        """提取用户ID（支持At和纯数字）"""
-        if not msg:
-            return ""
-
-        # 尝试提取At
-        at_match = re.search(r'\[CQ:at,qq=(\d+)\]', msg)
-        if at_match:
-            return at_match.group(1)
-
-        # 尝试提取纯数字
-        num_match = re.search(r'(\d{5,12})', msg)
-        if num_match:
-            return num_match.group(1)
-
-        return ""

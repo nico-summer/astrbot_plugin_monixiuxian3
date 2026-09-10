@@ -28,10 +28,11 @@ class ShopHandler:
         'material': "历练、秘境、悬赏、灵田收获与百宝阁限量",
     }
 
-    def __init__(self, db: DataBase, config: AstrBotConfig, config_manager: ConfigManager):
+    def __init__(self, db: DataBase, config: AstrBotConfig, config_manager: ConfigManager, item_registry=None):
         self.db = db
         self.config = config
         self.config_manager = config_manager
+        self.item_registry = item_registry
         self.shop_manager = ShopManager(config, config_manager)
         self.storage_ring_manager = StorageRingManager(db, config_manager)
         self.equipment_manager = EquipmentManager(db, config_manager, self.storage_ring_manager)
@@ -266,6 +267,11 @@ class ShopHandler:
                     'data': item_data,
                 }
         if not item:
+            # 秘境/Boss 掉落等未上架物品：使用统一物品索引兜底
+            registry_lines = self._get_registry_item_info(item_name.strip())
+            if registry_lines:
+                yield event.plain_result("\n".join(registry_lines))
+                return
             yield event.plain_result(f"未找到物品【{item_name}】，请检查名称或等待刷新。")
             return
 
@@ -282,6 +288,26 @@ class ShopHandler:
             "💡 使用 /丹阁、/器阁、/百宝阁 查看当前售卖物品"
         ]
         yield event.plain_result("\n".join(lines))
+
+    def _get_registry_item_info(self, item_name: str) -> list:
+        """从统一物品索引获取物品信息（覆盖秘境/Boss 等掉落物品）"""
+        registry = getattr(self, "item_registry", None)
+        if not registry:
+            return []
+        if not registry.is_known(item_name):
+            return []
+
+        lines = list(registry.get_detail_lines(item_name))
+        category = registry.get_category(item_name)
+
+        hints = {
+            "材料": "可用于 /炼化材料 或 /炼化图鉴 查看炼化收益；部分材料为炼丹配方原料",
+            "装备": "使用 /装备 <名称> 穿戴（饰品暂未开放独立装备栏）",
+            "功法": "使用 /装备 <功法名> 学习，最多同时装备3个",
+            "丹药": "使用 /服用丹药 <名称> 使用（丹药不占用储物戒）",
+        }
+        lines.append(f"💡 {hints.get(category, '可在 /储物戒 中查看持有数量')}")
+        return lines
 
     async def _apply_legacy_pill_effects(self, player: Player, item: dict, quantity: int) -> tuple:
         """应用旧系统丹药效果（items.json中的丹药）

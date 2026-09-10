@@ -188,6 +188,7 @@ CMD_LEAVE_MENTOR = "离开师门"
 # 组队系统
 CMD_CREATE_TEAM = "创建队伍"
 CMD_INVITE_TEAM = "邀请入队"
+CMD_JOIN_TEAM = "加入队伍"
 CMD_ACCEPT_TEAM = "接受组队"
 CMD_REJECT_TEAM = "拒绝组队"
 CMD_TEAM_INFO = "队伍信息"
@@ -208,6 +209,9 @@ class XiuXianPlugin(Star):
         self.config = config
         _current_dir = Path(__file__).parent
         self.config_manager = ConfigManager(_current_dir)
+        # 统一物品分类/信息索引（聚合配置与各系统掉落表）
+        from .core import ItemRegistry
+        self.item_registry = ItemRegistry(self.config_manager)
 
         files_config = self.config.get("FILES", {})
         db_filename = files_config.get("DATABASE_FILE", "xiuxian_data_v2.db")
@@ -221,8 +225,8 @@ class XiuXianPlugin(Star):
         self.equipment_handler = EquipmentHandler(self.db, self.config_manager)
         self.breakthrough_handler = BreakthroughHandler(self.db, self.config_manager, self.config)
         self.pill_handler = PillHandler(self.db, self.config_manager)
-        self.shop_handler = ShopHandler(self.db, self.config, self.config_manager)
-        self.storage_ring_handler = StorageRingHandler(self.db, self.config_manager)
+        self.shop_handler = ShopHandler(self.db, self.config, self.config_manager, self.item_registry)
+        self.storage_ring_handler = StorageRingHandler(self.db, self.config_manager, self.item_registry)
         
         # 初始化核心管理器
         from .core import StorageRingManager, EquipmentManager
@@ -1641,6 +1645,12 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_invite_team(self, event: AstrMessageEvent, target: str = ""):
         async for r in self.team_handlers.handle_invite_member(event, target):
+            yield r
+
+    @filter.command(CMD_JOIN_TEAM, "主动加入队伍（队伍编号或@队长）")
+    @require_whitelist
+    async def handle_join_team(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.team_handlers.handle_join_team(event, target):
             yield r
 
     @filter.command(CMD_ACCEPT_TEAM, "接受组队邀请")
