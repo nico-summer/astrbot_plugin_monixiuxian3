@@ -68,6 +68,8 @@ CMD_SEARCH_ITEM = "搜索物品"
 CMD_RETRIEVE_ALL = "取出所有"
 CMD_REFINE_MATERIAL = "炼化材料"
 CMD_REFINE_CATALOG = "炼化图鉴"
+CMD_REFINE_ALL = "一键炼化"
+CMD_REFINE_ALL_ALT = "炼化全部"
 
 # 宗门系统指令
 CMD_CREATE_SECT = "创建宗门"
@@ -1057,6 +1059,18 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_refine_catalog(self, event: AstrMessageEvent):
         async for r in self.storage_ring_handler.handle_refine_catalog(event):
+            yield r
+
+    @filter.command(CMD_REFINE_ALL, "一键炼化全部可炼化材料")
+    @require_whitelist
+    async def handle_refine_all(self, event: AstrMessageEvent):
+        async for r in self.storage_ring_handler.handle_refine_all(event):
+            yield r
+
+    @filter.command(CMD_REFINE_ALL_ALT, "一键炼化全部可炼化材料")
+    @require_whitelist
+    async def handle_refine_all_alias(self, event: AstrMessageEvent):
+        async for r in self.storage_ring_handler.handle_refine_all_alias(event):
             yield r
 
     # ===== 宗门系统指令 =====

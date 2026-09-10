@@ -364,7 +364,7 @@ class DatabaseExtended:
                 return False, 0
 
             items = json.loads(row["storage_ring_items"] or "{}")
-            current_count = int(items.get(item_name, 0))
+            current_count = self._extract_item_count(items.get(item_name))
             if count <= 0 or current_count < count:
                 await self.conn.rollback()
                 return False, current_count
@@ -394,8 +394,85 @@ class DatabaseExtended:
         except Exception:
             await self.conn.rollback()
             raise
-    
-    # ===== 秘境系统 CRUD =====
+
+    async def refine_storage_materials_batch(
+        self,
+        user_id: str,
+        refine_values: Dict[str, tuple],
+    ):
+        """原子炼化储物戒中全部可炼化材料，一次性发放总收益。
+
+        Args:
+            user_id: 玩家ID
+            refine_values: {材料名: (单份灵石, 单份修为)}
+
+        Returns:
+            (success, results, total_gold, total_exp)
+            results 为 [(材料名, 数量, 灵石, 修为), ...]
+        """
+        try:
+            await self.conn.execute("BEGIN IMMEDIATE")
+            async with self.conn.execute(
+                "SELECT storage_ring_items FROM players WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                await self.conn.rollback()
+                return False, [], 0, 0
+
+            items = json.loads(row["storage_ring_items"] or "{}")
+            results = []
+            total_gold = 0
+            total_exp = 0
+            for item_name, (gold_each, exp_each) in refine_values.items():
+                count = self._extract_item_count(items.get(item_name))
+                if count <= 0:
+                    continue
+
+                gold_gain = gold_each * count
+                exp_gain = exp_each * count
+                items.pop(item_name, None)
+                results.append((item_name, count, gold_gain, exp_gain))
+                total_gold += gold_gain
+                total_exp += exp_gain
+
+            if not results:
+                await self.conn.rollback()
+                return False, [], 0, 0
+
+            max_value = 2**63 - 1
+            await self.conn.execute(
+                "UPDATE players SET storage_ring_items = ?, "
+                "gold = MIN(gold + ?, ?), experience = MIN(experience + ?, ?) "
+                "WHERE user_id = ?",
+                (
+                    json.dumps(items, ensure_ascii=False),
+                    total_gold,
+                    max_value,
+                    total_exp,
+                    max_value,
+                    user_id,
+                )
+            )
+            await self.conn.commit()
+            return True, results, total_gold, total_exp
+        except Exception:
+            await self.conn.rollback()
+            raise
+
+    @staticmethod
+    def _extract_item_count(value) -> int:
+        """读取储物戒物品数量，兼容 int 与 {count, bound} 两种存储格式。"""
+        if isinstance(value, dict):
+            value = value.get("count", 0)
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return count if count > 0 else 0
+
+    # ===== 秘境系统 CRUD ====
     
     async def create_rift(self, rift: Rift) -> int:
         """创建秘境"""

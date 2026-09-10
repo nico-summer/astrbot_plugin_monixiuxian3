@@ -295,9 +295,16 @@ class StorageRingManager:
         return rings
 
     def get_item_count(self, player: Player, item_name: str) -> int:
-        """获取储物戒中某物品的数量"""
+        """获取储物戒中某物品的数量（兼容 int 与 {count, bound} 两种存储格式）"""
         items = player.get_storage_ring_items()
-        return items.get(item_name, 0)
+        value = items.get(item_name, 0)
+        if isinstance(value, dict):
+            value = value.get("count", 0)
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return count if count > 0 else 0
 
     def has_item(self, player: Player, item_name: str, count: int = 1) -> bool:
         """检查储物戒中是否有足够数量的物品"""

@@ -24,6 +24,8 @@ CMD_SEARCH_ITEM = "搜索物品"
 CMD_VIEW_CATEGORY = "查看分类"
 CMD_REFINE_MATERIAL = "炼化材料"
 CMD_REFINE_CATALOG = "炼化图鉴"
+CMD_REFINE_ALL = "一键炼化"
+CMD_REFINE_ALL_ALT = "炼化全部"
 
 MATERIAL_REFINING_VALUES = {
     "灵兽内丹": (500, 2000),
@@ -37,6 +39,18 @@ MATERIAL_REFINING_VALUES = {
     "远古秘籍": (18000, 72000),
     "仙器碎片": (30000, 120000),
 }
+
+
+def _to_item_count(value) -> int:
+    """解析储物戒物品数量，兼容 int 与 {count, bound} 两种存储格式。"""
+    if isinstance(value, dict):
+        value = value.get("count", 0)
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return count if count > 0 else 0
+
 
 # 物品分类定义
 ITEM_CATEGORIES = {
@@ -108,6 +122,7 @@ class StorageRingHandler:
         lines.append(f"取出：{CMD_RETRIEVE_ITEM} 物品名 [数量]\n")
         lines.append(f"搜索：{CMD_SEARCH_ITEM} 关键词\n")
         lines.append(f"炼化：{CMD_REFINE_MATERIAL} 材料名 [数量/全部]\n")
+        lines.append(f"一键炼化：{CMD_REFINE_ALL}（炼化全部可炼化材料）\n")
         lines.append(f"升级：{CMD_UPGRADE_RING} 储物戒名")
 
         yield event.plain_result("".join(lines))
@@ -118,8 +133,33 @@ class StorageRingHandler:
         lines = ["=== 材料炼化图鉴 ===\n", "以下Boss材料均可稳定炼化为灵石与修为。\n"]
         for item_name, (gold, experience) in MATERIAL_REFINING_VALUES.items():
             lines.append(f"【{item_name}】×1 → 灵石{gold:,} + 修为{experience:,}\n")
+
+        # 统计当前储物戒中可直接炼化的材料
+        items = player.get_storage_ring_items()
+        owned_lines = []
+        total_gold = 0
+        total_exp = 0
+        for item_name, (gold_each, exp_each) in MATERIAL_REFINING_VALUES.items():
+            count = _to_item_count(items.get(item_name))
+            if count <= 0:
+                continue
+            gold_gain = gold_each * count
+            exp_gain = exp_each * count
+            total_gold += gold_gain
+            total_exp += exp_gain
+            owned_lines.append(f"  · {item_name}×{count} → 灵石{gold_gain:,} + 修为{exp_gain:,}\n")
+
+        if owned_lines:
+            lines.append("\n📦 你可炼化的材料：\n")
+            lines.extend(owned_lines)
+            lines.append(f"合计可获：灵石{total_gold:,} + 修为{total_exp:,}\n")
+            lines.append(f"💡 使用 {CMD_REFINE_ALL} 一次性全部炼化\n")
+        else:
+            lines.append("\n📦 储物戒中暂时没有可炼化材料\n")
+
         lines.append(f"\n用法：{CMD_REFINE_MATERIAL} 材料名 数量\n")
-        lines.append(f"示例：{CMD_REFINE_MATERIAL} 仙器碎片 1；{CMD_REFINE_MATERIAL} 功法残页 全部")
+        lines.append(f"示例：{CMD_REFINE_MATERIAL} 仙器碎片 1；{CMD_REFINE_MATERIAL} 功法残页 全部\n")
+        lines.append(f"一键炼化：{CMD_REFINE_ALL}（无需参数，炼化所有可炼化材料）")
         yield event.plain_result("".join(lines))
 
     @player_required
@@ -172,6 +212,44 @@ class StorageRingHandler:
             f"🔥 炼化成功！\n【{item_name}】×{count}\n"
             f"获得灵石：+{gold_gain:,}\n获得修为：+{experience_gain:,}"
         )
+
+    @player_required
+    async def handle_refine_all(self, player: Player, event: AstrMessageEvent):
+        """一键炼化：把储物戒中所有可炼化材料一次性炼化。"""
+        async for r in self._refine_all(player, event):
+            yield r
+
+    @player_required
+    async def handle_refine_all_alias(self, player: Player, event: AstrMessageEvent):
+        """一键炼化（别名词条：炼化全部）。"""
+        async for r in self._refine_all(player, event):
+            yield r
+
+    async def _refine_all(self, player: Player, event: AstrMessageEvent):
+        """执行一键炼化并输出明细（不加装饰器，便于多个指令名复用）。"""
+        success, results, total_gold, total_exp = await self.db.ext.refine_storage_materials_batch(
+            player.user_id,
+            MATERIAL_REFINING_VALUES,
+        )
+
+        if not success or not results:
+            yield event.plain_result(
+                "❌ 储物戒中没有可炼化的材料\n"
+                f"使用 {CMD_REFINE_CATALOG} 查看可炼化材料与炼化价值"
+            )
+            return
+
+        lines = ["🔥 一键炼化完成！\n", "━━━━━━━━━━━━━━━\n"]
+        total_count = 0
+        for item_name, count, gold_gain, exp_gain in results:
+            total_count += count
+            lines.append(f"【{item_name}】×{count} → 灵石+{gold_gain:,} 修为+{exp_gain:,}\n")
+
+        lines.append("━━━━━━━━━━━━━━━\n")
+        lines.append(f"共炼化：{total_count} 个材料（{len(results)} 种）\n")
+        lines.append(f"获得灵石：+{total_gold:,}\n")
+        lines.append(f"获得修为：+{total_exp:,}")
+        yield event.plain_result("".join(lines))
 
     @player_required
     async def handle_store_item(self, player: Player, event: AstrMessageEvent, args: str):
