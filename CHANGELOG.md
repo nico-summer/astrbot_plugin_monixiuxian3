@@ -44,6 +44,21 @@
 - 修复：补充模块级 `datetime` 导入
 - 影响路径：秘境探索完成、宗门捐献（≥1000灵石）、历练完成、灵田收获的每日任务自动结算
 
+#### 宗门相关 AttributeError（我的信息 / 出关 / 传承挑战）
+
+- 现象1：`我的信息`、`出关` 报 `'PlayerHandler' object has no attribute 'sect_mgr'`
+- 现象2：宗门玩家存在过期借用功法时报 `'Player' object has no attribute 'get_techniques'`
+- 现象3：`传承挑战` 报 `'CombatManager' object has no attribute 'calculate_combat_stats'`
+- 根因：v3.5.0 的「借用功法到期检查」等新增代码引用了未初始化的属性与不存在的方法
+  （`Player` 实际只提供 `get_techniques_list()` / `set_techniques_list()`；
+  `CombatManager` 从未定义 `calculate_combat_stats()`）
+- 修复：
+  - `PlayerHandler.__init__` 初始化 `self.sect_mgr = SectManager(db, config_manager)`
+  - `SectManager` 中 5 处方法名改为 `Player` 实际提供的 `get_techniques_list()` / `set_techniques_list()`
+  - `ImpartPkManager` 新增 `_build_combat_stats()`，按切磋/决斗同一套公式（传承加成 + 装备加成）
+    构建战斗属性，`main.py` 注入 `config_manager`
+- 说明：触发条件为「已加入宗门」的玩家（`player.sect_id != 0`），因此无宗门玩家不受影响
+
 ### 🆕 功能优化
 
 - **一键服用**（`一键服用` / `批量服用`）：按上限规则服用背包中所有可服丹药

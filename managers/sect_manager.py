@@ -590,7 +590,7 @@ class SectManager:
             return False, "❌ 只有宗主和长老才能捐献功法！"
 
         # 检查是否拥有该功法
-        techniques = player.get_techniques()
+        techniques = player.get_techniques_list()
         if technique_name not in techniques and player.main_technique != technique_name:
             return False, f"❌ 你没有功法【{technique_name}】！"
 
@@ -642,7 +642,7 @@ class SectManager:
             return False, f"❌ 宗门功法库中没有功法【{technique_name}】！"
 
         # 检查是否已拥有该功法
-        techniques = player.get_techniques()
+        techniques = player.get_techniques_list()
         if technique_name in techniques or player.main_technique == technique_name:
             return False, f"❌ 你已经拥有功法【{technique_name}】！"
 
@@ -682,7 +682,7 @@ class SectManager:
             player.main_technique = technique_name
         else:
             techniques.append(technique_name)
-            player.set_techniques(techniques)
+            player.set_techniques_list(techniques)
 
         await self.db.conn.commit()
         await self.db.update_player(player)
@@ -757,7 +757,7 @@ class SectManager:
         if not player:
             return False, []
 
-        techniques = player.get_techniques()
+        techniques = player.get_techniques_list()
 
         for borrow_id, technique_name in expired_borrows:
             # 从玩家身上移除功法
@@ -775,7 +775,7 @@ class SectManager:
             returned_techniques.append(technique_name)
 
         if returned_techniques:
-            player.set_techniques(techniques)
+            player.set_techniques_list(techniques)
             await self.db.update_player(player)
             await self.db.conn.commit()
 

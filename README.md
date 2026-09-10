@@ -419,6 +419,9 @@ astrbot_plugin_monixiuxian2/
 - 修复秘境/商店掉落的旧版丹药（如七品太乙丹、三品凝神增益丹）在丹药背包中无法服用的问题
 - 修复秘境掉落装备无法穿戴的问题：45 件秘境装备现可正常装备
 - 修复宗门成员完成秘境探索时报 `name 'datetime' is not defined`（宗门战每日任务结算缺少 datetime 导入）
+- 修复宗门玩家 `我的信息` / `出关` 报 `'PlayerHandler' object has no attribute 'sect_mgr'`
+- 修复借用功法到期归还报 `'Player' object has no attribute 'get_techniques'`（改用 `get_techniques_list`）
+- 修复 `传承挑战` 报 `'CombatManager' object has no attribute 'calculate_combat_stats'`（按切磋战同一套公式重建战斗属性）
 
 **🆕 功能优化：**
 - 新增 `一键服用`（别名 `批量服用`）：按上限规则服用背包中所有可服丹药

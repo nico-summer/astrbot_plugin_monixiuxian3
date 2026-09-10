@@ -9,6 +9,7 @@ from ..core import CultivationManager, PillManager
 from ..models import Player
 from ..models_extended import UserStatus
 from ..config_manager import ConfigManager
+from ..managers.sect_manager import SectManager
 from .utils import player_required
 
 CMD_START_XIUXIAN = "我要修仙"
@@ -29,6 +30,8 @@ class PlayerHandler:
         self.config_manager = config_manager
         self.cultivation_manager = CultivationManager(config, config_manager)
         self.pill_manager = PillManager(self.db, self.config_manager)
+        # 借用功法到期检查（查看信息/出关时触发）
+        self.sect_mgr = SectManager(self.db, self.config_manager)
 
     async def handle_start_xiuxian(self, event: AstrMessageEvent, cultivation_type: str = ""):
         """处理创建角色

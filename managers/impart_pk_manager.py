@@ -1,10 +1,10 @@
 # managers/impart_pk_manager.py
 """传承PK系统管理器"""
 import random
-from typing import Tuple
+from typing import Tuple, Optional
 from ..data import DataBase
 from ..models import Player
-from .combat_manager import CombatManager
+from .combat_manager import CombatManager, CombatStats
 
 __all__ = ["ImpartPkManager"]
 
@@ -12,10 +12,65 @@ __all__ = ["ImpartPkManager"]
 class ImpartPkManager:
     """传承PK管理器 - 玩家间争夺传承的战斗"""
     
-    def __init__(self, db: DataBase, combat_mgr: CombatManager):
+    def __init__(self, db: DataBase, combat_mgr: CombatManager, config_manager=None):
         self.db = db
         self.combat_mgr = combat_mgr
-    
+        self.config_manager = config_manager
+
+    async def _build_combat_stats(self, player: Player) -> Optional[CombatStats]:
+        """构建战斗属性（与切磋/决斗一致：传承加成 + 装备加成）
+
+        原实现调用了 CombatManager 上不存在的 calculate_combat_stats()，
+        导致传承挑战必然抛 AttributeError。这里按现有战斗系统的同一套公式构建。
+        """
+        if not player:
+            return None
+
+        impart_info = await self.db.ext.get_impart_info(player.user_id)
+        hp_buff = impart_info.impart_hp_per if impart_info else 0.0
+        mp_buff = impart_info.impart_mp_per if impart_info else 0.0
+        atk_buff = impart_info.impart_atk_per if impart_info else 0.0
+
+        max_hp, max_mp = self.combat_mgr.calculate_hp_mp(player.experience, hp_buff, mp_buff)
+
+        magic_damage = player.magic_damage
+        physical_damage = player.physical_damage
+        defense = player.physical_defense + player.magic_defense
+
+        if self.config_manager:
+            from ..core import EquipmentManager
+
+            equipment_mgr = EquipmentManager(self.db, self.config_manager)
+            equipped_items = equipment_mgr.get_equipped_items(
+                player,
+                self.config_manager.items_data,
+                self.config_manager.weapons_data,
+            )
+            total_attrs = player.get_total_attributes(equipped_items)
+            magic_damage = total_attrs.get("magic_damage", magic_damage)
+            physical_damage = total_attrs.get("physical_damage", physical_damage)
+
+        atk = self.combat_mgr.calculate_atk(
+            player.experience,
+            player.cultivation_type,
+            magic_damage,
+            physical_damage,
+            player.atkpractice,
+            atk_buff,
+        )
+
+        return CombatStats(
+            user_id=player.user_id,
+            name=player.user_name if player.user_name else f"道友{player.user_id}",
+            hp=max_hp,
+            max_hp=max_hp,
+            mp=max_mp,
+            max_mp=max_mp,
+            atk=atk,
+            defense=defense,
+            exp=player.experience,
+        )
+
     async def challenge_impart(self, attacker: Player, defender: Player) -> Tuple[bool, str, dict]:
         """发起传承挑战
         
@@ -31,8 +86,10 @@ class ImpartPkManager:
         defender_impart = await self.db.ext.get_impart_info(defender.user_id)
         
         # 准备战斗属性
-        atk_stats = await self.combat_mgr.calculate_combat_stats(attacker)
-        def_stats = await self.combat_mgr.calculate_combat_stats(defender)
+        atk_stats = await self._build_combat_stats(attacker)
+        def_stats = await self._build_combat_stats(defender)
+        if not atk_stats or not def_stats:
+            return False, "❌ 战斗属性计算失败（玩家数据异常）", {}
         
         # 战斗模拟
         atk_hp = atk_stats.hp

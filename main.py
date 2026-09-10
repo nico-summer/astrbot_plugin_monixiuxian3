@@ -262,7 +262,7 @@ class XiuXianPlugin(Star):
         self.bounty_handlers = BountyHandlers(self.db, self.bounty_mgr)
         
         # Phase 3: 传承PK
-        self.impart_pk_mgr = ImpartPkManager(self.db, self.combat_mgr)
+        self.impart_pk_mgr = ImpartPkManager(self.db, self.combat_mgr, self.config_manager)
         self.impart_pk_handlers = ImpartPkHandlers(self.db, self.impart_pk_mgr)
         
         # Phase 4: 扩展功能
