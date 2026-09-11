@@ -803,17 +803,18 @@ class SectManager:
         # 读取今日任务记录（异常时降级显示全部未完成，保证面板可用）
         try:
             cursor = await self.db.conn.execute(
-                "SELECT donated_stone, completed_adventure, harvested_farm, completed_rift FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
+                "SELECT donated_stone, completed_adventure, harvested_farm, completed_rift, completed_world_event FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
                 (user_id, today)
             )
             row = await cursor.fetchone()
 
             if row:
-                donated_stone, completed_adventure, harvested_farm, completed_rift = row
+                donated_stone, completed_adventure, harvested_farm, completed_rift, completed_world_event = row
             else:
                 # 创建今日记录（(user_id, task_date) 复合主键，每天一行）
                 await self._ensure_daily_task_row(user_id, today)
                 donated_stone = completed_adventure = harvested_farm = completed_rift = 0
+                completed_world_event = 0
         except Exception as e:
             try:
                 await self.db.conn.rollback()
@@ -821,11 +822,12 @@ class SectManager:
                 pass
             logger.error(f"[宗门每日任务] 读取今日任务失败: {e}")
             donated_stone = completed_adventure = harvested_farm = completed_rift = 0
+            completed_world_event = 0
 
         # 定义任务列表
         all_tasks = {
             "donate_stone": {"name": "捐献灵石", "desc": "捐献1000灵石", "reward": 50, "completed": bool(donated_stone)},
-            "adventure": {"name": "完成历练", "desc": "完成任意历练", "reward": 30, "completed": bool(completed_adventure)},
+            "world_event": {"name": "参与世界事件", "desc": "参与任意世界事件（生还）", "reward": 30, "completed": bool(completed_world_event)},
             "farm_harvest": {"name": "种植灵草", "desc": "收获灵田", "reward": 20, "completed": bool(harvested_farm)},
             "rift_explore": {"name": "探索秘境", "desc": "完成秘境探索", "reward": 40, "completed": bool(completed_rift)},
         }
@@ -853,7 +855,7 @@ class SectManager:
 
         Args:
             user_id: 用户ID
-            task_type: 任务类型（donate_stone/adventure/farm_harvest/rift_explore）
+            task_type: 任务类型（donate_stone/world_event/farm_harvest/rift_explore）
 
         Returns:
             (成功标志, 获得的贡献度)
@@ -867,7 +869,7 @@ class SectManager:
         # 映射任务类型到列名
         task_column_map = {
             "donate_stone": "donated_stone",
-            "adventure": "completed_adventure",
+            "world_event": "completed_world_event",
             "farm_harvest": "harvested_farm",
             "rift_explore": "completed_rift",
         }
@@ -876,7 +878,7 @@ class SectManager:
         if not column_name:
             return False, 0
 
-        # 每日任务只是额外奖励：任何异常都不应让主指令（收获/完成探索/历练/捐献）失败
+        # 每日任务只是额外奖励：任何异常都不应让主指令（收获/完成探索/世界事件/捐献）失败
         try:
             # 确保今日任务记录存在（(user_id, task_date) 复合主键，每天一行）
             await self._ensure_daily_task_row(user_id, today)
@@ -903,7 +905,7 @@ class SectManager:
         # 奖励贡献度
         task_rewards = {
             "donate_stone": 50,
-            "adventure": 30,
+            "world_event": 30,
             "farm_harvest": 20,
             "rift_explore": 40,
         }
@@ -929,8 +931,9 @@ class SectManager:
         """
         sql = (
             "INSERT INTO sect_daily_tasks "
-            "(user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift) "
-            "VALUES (?, ?, 0, 0, 0, 0) "
+            "(user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift, "
+            "completed_world_event) "
+            "VALUES (?, ?, 0, 0, 0, 0, 0) "
             "ON CONFLICT(user_id, task_date) DO NOTHING"
         )
         try:

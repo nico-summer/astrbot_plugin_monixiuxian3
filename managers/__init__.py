@@ -5,7 +5,7 @@ from .sect_manager import SectManager
 from .boss_manager import BossManager
 from .rift_manager import RiftManager
 from .ranking_manager import RankingManager
-from .adventure_manager import AdventureManager
+from .world_event_manager import WorldEventManager
 from .alchemy_manager import AlchemyManager
 from .commission_manager import CommissionManager
 from .impart_manager import ImpartManager
@@ -27,7 +27,7 @@ __all__ = [
     "BossManager",
     "RiftManager",
     "RankingManager",
-    "AdventureManager",
+    "WorldEventManager",
     "AlchemyManager",
     "CommissionManager",
     "ImpartManager",

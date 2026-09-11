@@ -23,7 +23,7 @@ class BountyManager:
 
     BOUNTY_CACHE_DURATION = 600  # 任务列表缓存10分钟
     CONFIG_FILE = Path(__file__).resolve().parents[1] / "config" / "bounty_templates.json"
-    ADVENTURE_CONFIG_FILE = Path(__file__).resolve().parents[1] / "config" / "adventure_config.json"
+    WORLD_EVENT_CONFIG_FILE = Path(__file__).resolve().parents[1] / "config" / "world_events.json"
     DEFAULT_CONFIG = {
         "difficulties": {
             "easy": {"name": "F级", "stone_scale": 1.0, "exp_scale": 1.0, "min_level": 0}
@@ -34,7 +34,7 @@ class BountyManager:
                 "name": "击退妖兽",
                 "difficulty": "easy",
                 "category": "巡山",
-                "progress_tags": ["adventure_scout"],
+                "progress_tags": ["world_event_low"],
                 "min_target": 3,
                 "max_target": 5,
                 "time_limit": 3600,
@@ -60,7 +60,7 @@ class BountyManager:
         self.templates_by_id: Dict[int, dict] = {}
         self.templates_by_diff: Dict[str, List[dict]] = {}
         self.item_tables: Dict[str, List[dict]] = {}
-        self.adventure_tag_meta: Dict[str, Dict[str, int]] = {}
+        self.activity_tag_meta: Dict[str, Dict[str, int]] = {}
         self.reload_config()
 
     # -------- 配置 --------
@@ -77,7 +77,7 @@ class BountyManager:
             self.templates_by_id[tpl_copy["id"]] = tpl_copy
             self.templates_by_diff.setdefault(tpl_copy["difficulty"], []).append(tpl_copy)
         logger.info(f"悬赏配置加载完成：{len(self.templates_by_id)} 条模板")
-        self._load_adventure_meta()
+        self._load_activity_meta()
 
     def _load_config_file(self) -> dict:
         if self.CONFIG_FILE.exists():
@@ -88,24 +88,28 @@ class BountyManager:
                 logger.error(f"加载 bounty_templates.json 失败，将使用默认配置: {exc}")
         return self.DEFAULT_CONFIG
 
-    def _load_adventure_meta(self):
-        self.adventure_tag_meta = {}
-        if not self.ADVENTURE_CONFIG_FILE.exists():
+    def _load_activity_meta(self):
+        """加载世界事件各难度标签的时长，用于悬赏时限校准（批次4）"""
+        self.activity_tag_meta = {}
+        if not self.WORLD_EVENT_CONFIG_FILE.exists():
             return
         try:
-            with open(self.ADVENTURE_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(self.WORLD_EVENT_CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            for route in data.get("routes", []):
-                tag = str(route.get("bounty_tag", "")).lower()
-                if not tag:
-                    continue
-                self.adventure_tag_meta[tag] = {
-                    "duration": int(route.get("duration", 3600)),
-                    "fatigue": int(route.get("fatigue_cooldown", 0))
-                }
-            logger.info("已加载冒险路线元数据用于悬赏校准")
+
+            templates = (data or {}).get("event_templates") or {}
+            for tier_templates in templates.values():
+                for template in tier_templates or []:
+                    tag = str((template or {}).get("bounty_tag", "")).lower()
+                    if not tag:
+                        continue
+                    # 事件耗时 = 报名时长 + 战斗时长，用于估算悬赏完成时间
+                    duration = int(template.get("duration_minutes", 30) or 30) * 60
+                    meta = self.activity_tag_meta.setdefault(tag, {"duration": duration, "fatigue": 0})
+                    meta["duration"] = min(meta["duration"], duration)
+            logger.info(f"已加载 {len(self.activity_tag_meta)} 个世界事件标签用于悬赏校准")
         except Exception as exc:
-            logger.warning(f"加载冒险路线配置失败，将使用默认时限: {exc}")
+            logger.warning(f"加载世界事件配置失败，将使用默认时限: {exc}")
 
     # -------- 列表 & 缓存 --------
 
@@ -195,7 +199,7 @@ class BountyManager:
 
     def _calculate_time_limit(self, template: dict, target: int) -> int:
         base_limit = template.get("time_limit", 3600)
-        unit = self._get_adventure_unit_time(template)
+        unit = self._get_activity_unit_time(template)
         if not unit:
             return base_limit
         # 预估完成所有进度所需的最小时间
@@ -204,10 +208,10 @@ class BountyManager:
         buffer = max(600, unit // 2)
         return max(base_limit, expected + buffer)
 
-    def _get_adventure_unit_time(self, template: dict) -> Optional[int]:
+    def _get_activity_unit_time(self, template: dict) -> Optional[int]:
         durations = []
         for tag in template.get("progress_tags", []):
-            meta = self.adventure_tag_meta.get(tag.lower())
+            meta = self.activity_tag_meta.get(tag.lower())
             if meta:
                 # 考虑路线基础时长+部分休整
                 durations.append(meta.get("duration", 0) + meta.get("fatigue", 0))
@@ -346,7 +350,7 @@ class BountyManager:
                     f"任务：{active['bounty_name']}\n"
                     f"进度：{progress}/{target}\n"
                     f"━━━━━━━━━━━━━━━\n"
-                    f"💡 通过历练或秘境推进悬赏进度"
+                    f"💡 通过世界事件或秘境推进悬赏进度"
                 )
 
             rewards = json.loads(active["rewards"])

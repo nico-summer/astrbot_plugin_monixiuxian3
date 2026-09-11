@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 35  # v35: 委托炼丹（炼丹师称号 / 炼丹统计 / 委托炼丹）
+LATEST_DB_VERSION = 36  # v36: 世界事件（替代历练系统）+ 清理历练遗留状态
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -23,6 +23,7 @@ SECT_DAILY_TASKS_TABLE_SQL = """
         task_date TEXT NOT NULL,
         donated_stone INTEGER NOT NULL DEFAULT 0,
         completed_adventure INTEGER NOT NULL DEFAULT 0,
+        completed_world_event INTEGER NOT NULL DEFAULT 0,
         harvested_farm INTEGER NOT NULL DEFAULT 0,
         completed_rift INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (user_id, task_date),
@@ -198,6 +199,131 @@ async def repair_commission_tables(conn: aiosqlite.Connection) -> bool:
     return created
 
 
+
+
+# 世界事件（批次4）：世界事件表 + 事件参与者表
+WORLD_EVENTS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS world_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id TEXT NOT NULL,
+        event_data TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'signup',
+        create_time INTEGER NOT NULL DEFAULT 0,
+        signup_end_time INTEGER NOT NULL DEFAULT 0,
+        start_time INTEGER NOT NULL DEFAULT 0,
+        end_time INTEGER NOT NULL DEFAULT 0,
+        complete_time INTEGER NOT NULL DEFAULT 0
+    )
+"""
+
+WORLD_EVENT_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_world_events_group ON world_events(group_id)",
+    "CREATE INDEX IF NOT EXISTS idx_world_events_status ON world_events(status)",
+)
+
+EVENT_PARTICIPANTS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS event_participants (
+        event_id INTEGER NOT NULL,
+        user_id TEXT NOT NULL,
+        join_time INTEGER NOT NULL DEFAULT 0,
+        result TEXT,
+        PRIMARY KEY (event_id, user_id),
+        FOREIGN KEY (event_id) REFERENCES world_events(event_id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+    )
+"""
+
+EVENT_PARTICIPANTS_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_event_participants_user ON event_participants(user_id)",
+)
+
+
+async def repair_world_event_tables(conn: aiosqlite.Connection) -> bool:
+    """确保世界事件相关表存在（幂等）
+
+    - world_events：世界事件主体（group_id + event_data 快照 + 状态机时间）
+    - event_participants：报名名单与结算结果
+
+    Returns:
+        True 表示至少创建过一张表，False 表示表已齐全
+    """
+    created = False
+    for table, sql in (
+        ("world_events", WORLD_EVENTS_TABLE_SQL),
+        ("event_participants", EVENT_PARTICIPANTS_TABLE_SQL),
+    ):
+        async with conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ) as cursor:
+            exists = await cursor.fetchone()
+        if exists:
+            continue
+        await conn.execute(sql)
+        logger.info(f"已创建 {table} 表")
+        created = True
+
+    for sql in WORLD_EVENT_INDEX_SQL + EVENT_PARTICIPANTS_INDEX_SQL:
+        await conn.execute(sql)
+
+    return created
+
+
+async def clear_legacy_adventure_state(conn: aiosqlite.Connection) -> int:
+    """清理历练系统遗留数据（批次4 移除历练系统）
+
+    历练（UserStatus.ADVENTURING = 2）已下线，但玩家可能仍卡在
+    「历练中」的忙碌状态里，导致所有指令被拦截，这里统一清理。
+    宗门每日任务的 ``completed_adventure`` 列保留（老库兼容），仅停用该任务。
+
+    Returns:
+        清理的用户忙碌状态记录数
+    """
+    async with conn.execute("PRAGMA table_info(user_cd)") as cursor:
+        columns = await cursor.fetchall()
+    if not columns:
+        return 0
+
+    try:
+        cursor = await conn.execute("DELETE FROM user_cd WHERE type = 2")
+        removed = cursor.rowcount or 0
+    except Exception as e:
+        logger.warning(f"清理历练忙碌状态失败（不影响启动）: {e}")
+        return 0
+
+    if removed:
+        logger.info(f"已清理 {removed} 条历练遗留忙碌状态")
+    return removed
+
+
+# 宗门每日任务：新增「参与世界事件」列（历练任务下线）
+SECT_DAILY_TASK_EXTRA_COLUMNS = {
+    "completed_world_event": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
+async def repair_sect_daily_task_columns(conn: aiosqlite.Connection) -> bool:
+    """确保 sect_daily_tasks 表包含批次4 新增列（幂等）
+
+    Returns:
+        True 表示至少补充过一列，False 表示字段已齐全
+    """
+    async with conn.execute("PRAGMA table_info(sect_daily_tasks)") as cursor:
+        columns = {row[1] for row in await cursor.fetchall()}
+
+    if not columns:
+        # 表尚不存在（未初始化），交由建表流程处理
+        return False
+
+    repaired = False
+    for column, definition in SECT_DAILY_TASK_EXTRA_COLUMNS.items():
+        if column in columns:
+            continue
+        await conn.execute(f"ALTER TABLE sect_daily_tasks ADD COLUMN {column} {definition}")
+        logger.info(f"已补充 sect_daily_tasks.{column} 字段")
+        repaired = True
+    return repaired
+
+
 async def repair_shop_refresh_usage_table(conn: aiosqlite.Connection) -> bool:
     """确保 shop_refresh_usage 表存在（幂等）"""
     async with conn.execute("PRAGMA table_info(shop_refresh_usage)") as cursor:
@@ -241,15 +367,19 @@ async def repair_sect_daily_tasks_table(conn: aiosqlite.Connection) -> bool:
 
     # 保留 (user_id, task_date) 维度；若旧表已含任务字段则一并保留进度
     task_date_expr = "task_date" if "task_date" in column_names else "date('now')"
-    task_columns = ("donated_stone", "completed_adventure", "harvested_farm", "completed_rift")
-    if all(name in column_names for name in task_columns):
-        values_expr = ", ".join(f"COALESCE({name}, 0)" for name in task_columns)
-    else:
-        values_expr = "0, 0, 0, 0"
+    task_columns = (
+        "donated_stone", "completed_adventure", "harvested_farm",
+        "completed_rift", "completed_world_event",
+    )
+    # 旧库可能缺少部分列（如 completed_world_event），缺失列按 0 补齐
+    values_expr = ", ".join(
+        f"COALESCE({name}, 0)" if name in column_names else "0" for name in task_columns
+    )
 
     try:
         await conn.execute(f"""
-            INSERT OR IGNORE INTO sect_daily_tasks (user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift)
+            INSERT OR IGNORE INTO sect_daily_tasks
+                (user_id, task_date, {", ".join(task_columns)})
             SELECT user_id, COALESCE(NULLIF({task_date_expr}, ''), date('now')), {values_expr}
             FROM sect_daily_tasks_old
         """)
@@ -421,6 +551,14 @@ class MigrationManager:
             if await repair_alchemy_tables(self.conn):
                 await self.conn.commit()
                 logger.info("启动自检：炼丹系统相关表已创建")
+            if await repair_world_event_tables(self.conn):
+                await self.conn.commit()
+                logger.info("启动自检：世界事件相关表已创建")
+            if await repair_sect_daily_task_columns(self.conn):
+                await self.conn.commit()
+                logger.info("启动自检：宗门每日任务新列已补齐")
+            if await clear_legacy_adventure_state(self.conn):
+                await self.conn.commit()
             if await repair_commission_tables(self.conn):
                 await self.conn.commit()
                 logger.info("启动自检：委托炼丹相关表已创建")
@@ -1787,3 +1925,26 @@ async def _migrate_to_v35(conn: aiosqlite.Connection, config_manager: ConfigMana
         logger.info("v35迁移完成：委托炼丹相关表已创建")
     else:
         logger.info("v35迁移完成：委托炼丹相关表已存在，无需变更")
+
+
+@migration(36)
+async def _migrate_to_v36(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v36 - 世界事件系统（批次4）
+
+    1. 新增 world_events / event_participants 两张表
+    2. 宗门每日任务新增「参与世界事件」列（历练任务下线）
+    3. 清理历练系统遗留的忙碌状态（type = 2），避免玩家卡在「历练中」
+    """
+    logger.info("开始迁移到v36：世界事件系统（替代历练系统）")
+
+    created = await repair_world_event_tables(conn)
+    if created:
+        logger.info("v36迁移完成：世界事件相关表已创建")
+    else:
+        logger.info("v36迁移完成：世界事件相关表已存在，无需变更")
+
+    if await repair_sect_daily_task_columns(conn):
+        logger.info("v36迁移完成：宗门每日任务已新增 completed_world_event 列")
+
+    await clear_legacy_adventure_state(conn)
+    await conn.commit()

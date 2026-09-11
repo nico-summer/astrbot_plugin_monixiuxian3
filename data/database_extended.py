@@ -629,7 +629,7 @@ class DatabaseExtended:
         
         Args:
             user_id: 用户ID
-            busy_type: 0=空闲, 1=闭关, 2=历练, 3=探索秘境
+            busy_type: 0=空闲, 1=闭关, 3=探索秘境, 4=宗门任务
             scheduled_time: 计划完成时间戳
             extra_data: 额外数据（如秘境ID等）
         """

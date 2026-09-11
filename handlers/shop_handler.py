@@ -17,7 +17,7 @@ class ShopHandler:
     
     ITEM_ACQUIRE_HINTS = {
         'pill': "丹阁刷新、秘境稀有掉落",
-        'exp_pill': "丹阁、炼丹系统、历练/秘境奖励",
+        "exp_pill": "丹阁、炼丹系统、世界事件/秘境奖励",
         'utility_pill': "丹阁稀有、秘境/Boss 掉落",
         'legacy_pill': "百宝阁限量，购买后立即生效",
         'weapon': "器阁、Boss 掉落",
@@ -25,7 +25,7 @@ class ShopHandler:
         'accessory': "器阁、Boss 掉落",
         'main_technique': "百宝阁稀有刷新",
         'technique': "百宝阁刷新购买",
-        'material': "历练、秘境、悬赏、灵田收获与百宝阁限量",
+        'material': "世界事件、秘境、悬赏、灵田收获与百宝阁限量",
     }
 
     def __init__(self, db: DataBase, config: AstrBotConfig, config_manager: ConfigManager, item_registry=None):

@@ -1,3 +1,6 @@
+# ⚠️ 已废弃（批次4 / v3.7.0）：历练系统已被「世界事件系统」替代。
+# 保留本文件仅为方便回滚：去掉 .deprecated 后缀，并恢复 main.py 与 __init__.py 的引用即可。
+# 当前版本不再导入本文件，也不会被插件加载。
 # handlers/adventure_handlers.py
 from astrbot.api.event import AstrMessageEvent
 from ..managers.adventure_manager import AdventureManager

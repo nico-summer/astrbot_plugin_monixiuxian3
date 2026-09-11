@@ -8,7 +8,7 @@
 索引来源（按优先级从高到低）：
 1. 配置文件：items.json / weapons.json / pills.json / exp_pills.json /
    utility_pills.json / storage_rings.json / alchemy_recipes.json
-2. 各系统掉落表：秘境 / 世界Boss / 历练 / 悬赏 / 灵田
+2. 各系统掉落表：秘境 / 世界Boss / 世界事件 / 悬赏 / 灵田
 
 这样秘境、Boss 等系统掉落但未登记进配置的物品也能被正确分类与查询。
 """
@@ -211,17 +211,34 @@ class ItemRegistry:
         except Exception as exc:  # pragma: no cover
             self._build_error = f"Boss掉落表登记失败: {exc}"
 
-        # 历练
+        # 世界事件（批次4：替代历练系统）
         try:
-            from ..managers.adventure_manager import AdventureManager
+            from ..managers.world_event_manager import WorldEventManager
 
-            config = self._load_json_file(getattr(AdventureManager, "CONFIG_FILE", None))
-            drop_tables = (config or {}).get("drop_tables") or AdventureManager.DEFAULT_CONFIG.get("drop_tables", {})
-            for tier_table in drop_tables.values():
-                for entry in tier_table or []:
-                    self._register_drop_entry(entry, CATEGORY_MATERIAL, "历练掉落")
+            config = self._load_json_file(WorldEventManager.CONFIG_FILE)
+            templates = (config or {}).get("event_templates") or {}
+            for tier_templates in templates.values():
+                for template in tier_templates or []:
+                    rewards = (template or {}).get("rewards") or {}
+                    for material in rewards.get("materials", []):
+                        self._register_drop_entry(material, CATEGORY_MATERIAL, "世界事件奖励")
+
+            # 事件掉落装备使用掉落表生成的配置，保证品质/类型与装备系统一致
+            for entry in WorldEventManager.get_equipment_index().values():
+                weapon_category = entry.get("weapon_category")
+                self._register(
+                    entry["name"],
+                    CATEGORY_EQUIPMENT,
+                    {
+                        "category": CATEGORY_EQUIPMENT,
+                        "subtype": weapon_category or self._equipment_type_label(entry.get("type")),
+                        "rank": entry.get("rank"),
+                        "description": entry.get("description"),
+                        "source": "世界事件奖励",
+                    },
+                )
         except Exception as exc:  # pragma: no cover
-            self._build_error = f"历练掉落表登记失败: {exc}"
+            self._build_error = f"世界事件掉落表登记失败: {exc}"
 
         # 悬赏
         try:
@@ -495,7 +512,7 @@ class ItemRegistry:
     def _source_from_item(data: dict) -> str:
         if data.get("shop_weight", 0) in (0, None):
             return "世界Boss击杀掉落"
-        return "百宝阁购买、历练与秘境掉落"
+        return "百宝阁购买、世界事件与秘境掉落"
 
     @staticmethod
     def _load_json_file(path) -> Optional[dict]:

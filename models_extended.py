@@ -13,7 +13,6 @@ class UserStatus(IntEnum):
     """用户状态枚举"""
     IDLE = 0           # 空闲
     CULTIVATING = 1    # 闭关中
-    ADVENTURING = 2    # 历练中
     EXPLORING = 3      # 探索秘境中
     SECT_TASK = 4      # 宗门任务中
     
@@ -23,7 +22,6 @@ class UserStatus(IntEnum):
         names = {
             cls.IDLE: "空闲",
             cls.CULTIVATING: "闭关中",
-            cls.ADVENTURING: "历练中",
             cls.EXPLORING: "探索秘境中",
             cls.SECT_TASK: "宗门任务中",
         }

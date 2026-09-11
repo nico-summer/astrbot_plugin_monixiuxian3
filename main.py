@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 from functools import wraps
 from pathlib import Path
@@ -12,14 +13,13 @@ from .handlers import (
     MiscHandler, HelpHandler, PlayerHandler, EquipmentHandler, BreakthroughHandler,
     PillHandler, ShopHandler, StorageRingHandler,
     SectHandlers, BossHandlers, CombatHandlers, RankingHandlers,
-    RiftHandlers, AdventureHandlers, AlchemyHandlers, ImpartHandlers,
+    RiftHandlers, WorldEventHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
     BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
-    MentorshipHandlers, TeamHandlers, RevivalHandler, CommissionHandlers
 )
 from .managers import (
     CombatManager, SectManager, BossManager, RiftManager,
-    RankingManager, AdventureManager, AlchemyManager, ImpartManager,
+    RankingManager, WorldEventManager, AlchemyManager, ImpartManager,
     BankManager, BountyManager, ImpartPkManager,
     BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager,
     MentorshipManager, TeamManager, CommissionManager
@@ -30,6 +30,11 @@ from .handlers.commission_handlers import (
     CMD_BECOME_ALCHEMIST, CMD_CREATE_COMMISSION, CMD_LIST_COMMISSIONS,
     CMD_MY_COMMISSIONS, CMD_ACCEPT_COMMISSION, CMD_COMPLETE_COMMISSION,
     CMD_CANCEL_COMMISSION, CMD_ABANDON_COMMISSION, CMD_ALCHEMIST_INFO,
+)
+# 世界事件（批次4）：指令名统一定义在 handlers/world_event_handlers.py，
+# 保证「注册指令名」与「提示文案里的指令名」始终一致
+from .handlers.world_event_handlers import (
+    CMD_WORLD_EVENT, CMD_JOIN_WORLD_EVENT, CMD_LEAVE_WORLD_EVENT, CMD_WORLD_EVENT_RECORD,
 )
 
 
@@ -56,7 +61,7 @@ CMD_HELP_TOPICS = {
     "灵田": "灵田帮助",
     "师徒": "师徒帮助",
     "悬赏": "悬赏帮助",
-    "历练": "历练帮助",
+    "世界事件": "世界事件帮助",
     "洞天": "洞天帮助",
     "银行": "银行帮助",
     "丹药": "丹药帮助",
@@ -148,13 +153,6 @@ CMD_RIFT_LIST = "秘境列表"
 CMD_RIFT_EXPLORE = "探索秘境"
 CMD_RIFT_COMPLETE = "完成探索"
 CMD_RIFT_EXIT = "退出秘境"
-
-# 历练系统指令
-CMD_ADVENTURE_START = "开始历练"
-CMD_ADVENTURE_COMPLETE = "完成历练"
-CMD_ADVENTURE_STATUS = "历练状态"
-CMD_ADVENTURE_INFO = "历练信息"
-
 # 炼丹系统指令
 CMD_ALCHEMY_RECIPES = "丹药配方"
 CMD_ALCHEMY_CRAFT = "炼丹"
@@ -274,7 +272,7 @@ class XiuXianPlugin(Star):
         self.storage_ring_handler = StorageRingHandler(self.db, self.config_manager, self.item_registry)
         
         # 初始化核心管理器
-        from .core import StorageRingManager, EquipmentManager
+        from .core import StorageRingManager, EquipmentManager, DeathManager
         self.storage_ring_mgr = StorageRingManager(self.db, self.config_manager)
         self.equipment_mgr = EquipmentManager(self.db, self.config_manager, self.storage_ring_mgr)
 
@@ -283,7 +281,10 @@ class XiuXianPlugin(Star):
         self.boss_mgr = BossManager(self.db, self.combat_mgr, self.config_manager, self.storage_ring_mgr, self.equipment_mgr)
         self.rift_mgr = RiftManager(self.db, self.config_manager, self.storage_ring_mgr, self.sect_mgr)
         self.rank_mgr = RankingManager(self.db, self.combat_mgr, self.config_manager)
-        self.adventure_mgr = AdventureManager(self.db, self.storage_ring_mgr, self.sect_mgr)
+        self.death_mgr = DeathManager(self.db, self.config_manager, self.config)
+        self.world_event_mgr = WorldEventManager(
+            self.db, self.config_manager, self.storage_ring_mgr, self.death_mgr
+        )
         self.alchemy_mgr = AlchemyManager(self.db, self.config_manager, self.storage_ring_mgr)
         # 委托炼丹（批次3）：炼丹师职业 + 玩家间委托炼丹
         self.commission_mgr = CommissionManager(
@@ -297,7 +298,7 @@ class XiuXianPlugin(Star):
         self.combat_handlers = CombatHandlers(self.db, self.combat_mgr, self.config_manager)
         self.ranking_handlers = RankingHandlers(self.db, self.rank_mgr)
         self.rift_handlers = RiftHandlers(self.db, self.rift_mgr)
-        self.adventure_handlers = AdventureHandlers(self.db, self.adventure_mgr)
+        self.world_event_handlers = WorldEventHandlers(self.db, self.world_event_mgr)
         self.alchemy_handlers = AlchemyHandlers(self.db, self.alchemy_mgr)
         self.commission_handlers = CommissionHandlers(
             self.db, self.commission_mgr, self.alchemy_mgr
@@ -310,6 +311,8 @@ class XiuXianPlugin(Star):
         self.bounty_mgr = BountyManager(self.db, self.storage_ring_mgr)
         self.bank_handlers = BankHandlers(self.db, self.bank_mgr)
         self.bounty_handlers = BountyHandlers(self.db, self.bounty_mgr)
+        # 世界事件（批次4）：生还者自动推进悬赏进度
+        self.world_event_mgr.bounty_manager = self.bounty_mgr
         
         # Phase 3: 传承PK
         self.impart_pk_mgr = ImpartPkManager(self.db, self.combat_mgr, self.config_manager)
@@ -347,6 +350,7 @@ class XiuXianPlugin(Star):
         self.loan_check_task = None # 贷款逾期检查任务
         self.spirit_eye_task = None # 灵眼生成任务
         self.bounty_check_task = None  # 悬赏过期检查任务
+        self.world_event_task = None  # 世界事件推进/自动生成任务
 
         access_control_config = self.config.get("ACCESS_CONTROL", {})
         self.whitelist_groups = [str(g) for g in access_control_config.get("WHITELIST_GROUPS", [])]
@@ -404,6 +408,7 @@ class XiuXianPlugin(Star):
         self.loan_check_task = asyncio.create_task(self._schedule_loan_check())
         self.spirit_eye_task = asyncio.create_task(self._schedule_spirit_eye_spawn())
         self.bounty_check_task = asyncio.create_task(self._schedule_bounty_check())
+        self.world_event_task = asyncio.create_task(self._schedule_world_event())
 
         logger.info("【修仙插件】已加载。")
 
@@ -414,6 +419,8 @@ class XiuXianPlugin(Star):
             self.loan_check_task.cancel()
         if self.spirit_eye_task:
             self.spirit_eye_task.cancel()
+        if self.world_event_task:
+            self.world_event_task.cancel()
         if self.bounty_check_task:
             self.bounty_check_task.cancel()
         await self.db.close()
@@ -892,6 +899,123 @@ class XiuXianPlugin(Star):
         except Exception as e:
             logger.error(f"【修仙插件】灵眼广播异常: {e}")
 
+    # ===== 世界事件定时任务（批次4）=====
+
+    # 事件状态推进间隔（秒）：报名截止开战 / 战斗结束结算
+    WORLD_EVENT_TICK_SECONDS = 30
+
+    def _world_event_target_groups(self) -> list:
+        """世界事件的目标群：优先 broadcast_groups，其次白名单群"""
+        config = self.world_event_mgr._config()
+        groups = [str(g).strip() for g in (config.get("broadcast_groups") or []) if str(g).strip()]
+        if not groups:
+            groups = [str(g) for g in self.whitelist_groups]
+
+        # 去重保序
+        unique_groups = []
+        for group_id in groups:
+            if group_id and group_id not in unique_groups:
+                unique_groups.append(group_id)
+        return unique_groups
+
+    async def _schedule_world_event(self):
+        """世界事件定时任务：推进事件状态 + 定时自动生成（指数退避重试）"""
+        retry_count = 0
+        max_retry_delay = 1800
+
+        while True:
+            try:
+                await self.db.ensure_connection()
+                await self._advance_world_events()
+                await self._maybe_auto_generate_world_event()
+                retry_count = 0
+                await asyncio.sleep(self.WORLD_EVENT_TICK_SECONDS)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"世界事件任务异常: {e}")
+                retry_count += 1
+                delay = min(60 * (2 ** retry_count), max_retry_delay)
+                logger.info(f"【修仙插件】世界事件任务将在 {delay} 秒后重试（第{retry_count}次）")
+                await asyncio.sleep(delay)
+
+    async def _advance_world_events(self):
+        """推进事件状态：报名截止自动开战、战斗结束自动结算，并广播到事件所在群"""
+        try:
+            messages = await self.world_event_mgr.process_pending_events()
+        except Exception as e:
+            logger.error(f"世界事件推进失败: {e}")
+            return
+
+        for group_id, message in messages:
+            await self._broadcast_world_event(group_id, message)
+
+    async def _maybe_auto_generate_world_event(self):
+        """按配置间隔自动开启世界事件（下次生成时间持久化，重启不重置）"""
+        config = self.world_event_mgr._config()
+        if not config.get("auto_generate", True):
+            return
+
+        interval_range = config.get("auto_interval_minutes") or [120, 240]
+        try:
+            low, high = float(interval_range[0]), float(interval_range[1])
+        except (TypeError, ValueError, IndexError):
+            low, high = 120.0, 240.0
+        low, high = max(1.0, low), max(1.0, high)
+        if high < low:
+            low, high = high, low
+
+        now = int(time.time())
+        next_time_text = await self.db.ext.get_system_config("world_event_next_time")
+        next_time = 0
+        if next_time_text:
+            try:
+                next_time = int(next_time_text)
+            except (TypeError, ValueError):
+                next_time = 0
+
+        if not next_time:
+            # 首次启动：只排期，避免插件重启后立刻刷一场事件
+            await self.db.ext.set_system_config(
+                "world_event_next_time", str(now + int(random.uniform(low, high) * 60))
+            )
+            return
+
+        if now < next_time:
+            return
+
+        groups = self._world_event_target_groups()
+        success, msg, created = await self.world_event_mgr.auto_create_events(groups)
+        if success:
+            for group_id in created:
+                await self._broadcast_world_event(group_id, msg)
+            logger.info(f"【修仙插件】世界事件自动开启，覆盖 {len(created)} 个群")
+        else:
+            logger.info(f"【修仙插件】世界事件本次跳过：{msg}")
+
+        next_delay = int(random.uniform(low, high) * 60)
+        await self.db.ext.set_system_config("world_event_next_time", str(int(time.time()) + next_delay))
+
+    async def _broadcast_world_event(self, group_id: str, message: str):
+        """把世界事件消息广播到指定群（所有平台实例）"""
+        from astrbot.api.event import MessageChain
+
+        if not group_id or not message:
+            return
+
+        message_chain = MessageChain().message(message)
+        try:
+            platforms = self.context.platform_manager.get_insts()
+            for platform in platforms:
+                platform_name = platform.meta().name if hasattr(platform, 'meta') and callable(platform.meta) else "unknown"
+                umo = f"{platform_name}:GroupMessage:{group_id}"
+                try:
+                    await self.context.send_message(umo, message_chain)
+                except Exception as e:
+                    logger.warning(f"【修仙插件】世界事件广播发送失败 (群{group_id}): {e}")
+        except Exception as e:
+            logger.error(f"【修仙插件】世界事件广播异常: {e}")
+
     @filter.command(CMD_HELP, "显示帮助信息（可指定系统：修仙帮助 宗门）")
     @require_whitelist
     async def handle_help(self, event: AstrMessageEvent, topic: str = ""):
@@ -1253,10 +1377,10 @@ class XiuXianPlugin(Star):
         async for r in self.help_handler.handle_topic(event, "悬赏"):
             yield r
 
-    @filter.command(CMD_HELP_TOPICS["历练"], "历练系统详细帮助")
+    @filter.command(CMD_HELP_TOPICS["世界事件"], "世界事件系统详细帮助")
     @require_whitelist
-    async def handle_help_adventure(self, event: AstrMessageEvent):
-        async for r in self.help_handler.handle_topic(event, "历练"):
+    async def handle_help_world_event(self, event: AstrMessageEvent):
+        async for r in self.help_handler.handle_topic(event, "世界事件"):
             yield r
 
     @filter.command(CMD_HELP_TOPICS["洞天"], "洞天福地详细帮助")
@@ -1556,41 +1680,29 @@ class XiuXianPlugin(Star):
         async for r in self.rift_handlers.handle_rift_exit(event):
             yield r
 
-    # ===== 历练指令 =====
-    @filter.command(CMD_ADVENTURE_START, "开始历练")
+    # ===== 世界事件指令（批次4：替代历练系统）=====
+    @filter.command(CMD_WORLD_EVENT, "查看本群进行中的世界事件")
     @require_whitelist
-    async def handle_adventure_start(self, event: AstrMessageEvent, route: str = ""):
-        async for r in self.adventure_handlers.handle_start_adventure(event, route):
+    async def handle_world_event(self, event: AstrMessageEvent):
+        async for r in self.world_event_handlers.handle_show(event):
             yield r
 
-    @filter.command(CMD_ADVENTURE_COMPLETE, "完成历练")
+    @filter.command(CMD_JOIN_WORLD_EVENT, "加入世界事件")
     @require_whitelist
-    async def handle_adventure_complete(self, event: AstrMessageEvent):
-        user_id = event.get_sender_id()
-        success, msg, reward_data = await self.adventure_mgr.finish_adventure(user_id)
-        
-        # 如果历练成功完成，更新悬赏进度
-        if success and reward_data:
-            player = await self.db.get_player_by_id(user_id)
-            if player:
-                bounty_tag = reward_data.get("bounty_tag", "adventure")
-                bounty_value = reward_data.get("bounty_progress", 1)
-                has_progress, bounty_msg = await self.bounty_mgr.add_bounty_progress(player, bounty_tag, bounty_value)
-                if has_progress:
-                    msg += bounty_msg
-        
-        yield event.plain_result(msg)
-
-    @filter.command(CMD_ADVENTURE_STATUS, "查看历练状态")
-    @require_whitelist
-    async def handle_adventure_status(self, event: AstrMessageEvent):
-        async for r in self.adventure_handlers.handle_adventure_status(event):
+    async def handle_join_world_event(self, event: AstrMessageEvent):
+        async for r in self.world_event_handlers.handle_join(event):
             yield r
 
-    @filter.command(CMD_ADVENTURE_INFO, "查看历练系统说明")
+    @filter.command(CMD_LEAVE_WORLD_EVENT, "退出世界事件（报名阶段）")
     @require_whitelist
-    async def handle_adventure_info(self, event: AstrMessageEvent):
-        async for r in self.adventure_handlers.handle_adventure_info(event):
+    async def handle_leave_world_event(self, event: AstrMessageEvent):
+        async for r in self.world_event_handlers.handle_leave(event):
+            yield r
+
+    @filter.command(CMD_WORLD_EVENT_RECORD, "查看个人世界事件战绩")
+    @require_whitelist
+    async def handle_world_event_record(self, event: AstrMessageEvent):
+        async for r in self.world_event_handlers.handle_record(event):
             yield r
 
     # ===== 炼丹指令 =====

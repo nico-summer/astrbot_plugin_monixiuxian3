@@ -111,16 +111,28 @@ class EquipmentManager:
 
     @staticmethod
     def _resolve_drop_equipment_config(item_name: str) -> Optional[dict]:
-        """解析秘境等系统掉落的装备（未登记进 items.json / weapons.json）
+        """解析秘境 / 世界事件等系统掉落的装备（未登记进 items.json / weapons.json）
 
-        避免「秘境掉落的装备只能炼化、无法穿戴」的问题。
+        避免「掉落装备只能炼化、无法穿戴」的问题。
         """
         try:
             from ..managers.rift_manager import RiftManager
         except Exception:
+            RiftManager = None
+        if RiftManager is not None:
+            try:
+                config = RiftManager.get_equipment_config(item_name)
+            except Exception:
+                config = None
+            if config:
+                return config
+
+        try:
+            from ..managers.world_event_manager import WorldEventManager
+        except Exception:
             return None
         try:
-            return RiftManager.get_equipment_config(item_name)
+            return WorldEventManager.get_equipment_config(item_name)
         except Exception:
             return None
 

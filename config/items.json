@@ -956,5 +956,86 @@
         "price": 50,
         "required_level_index": 0,
         "shop_weight": 0
+    },
+    "2037": {
+        "name": "妖兽皮毛",
+        "type": "材料",
+        "rank": "凡品",
+        "description": "低阶妖兽的皮毛，可制符炼器（世界事件掉落）。",
+        "price": 300,
+        "required_level_index": 1,
+        "shop_weight": 40
+    },
+    "2038": {
+        "name": "邪修令牌",
+        "type": "材料",
+        "rank": "珍品",
+        "description": "邪修随身令牌，蕴含阴煞之气，可用于炼器（世界事件掉落）。",
+        "price": 1200,
+        "required_level_index": 1,
+        "shop_weight": 25
+    },
+    "2039": {
+        "name": "血灵珠",
+        "type": "材料",
+        "rank": "珍品",
+        "description": "以血煞凝成的灵珠，可入药亦可炼器（世界事件掉落）。",
+        "price": 1500,
+        "required_level_index": 1,
+        "shop_weight": 20
+    },
+    "2040": {
+        "name": "魔核",
+        "type": "材料",
+        "rank": "天品",
+        "description": "魔修体内凝结的核心，蕴含精纯魔力（世界事件掉落）。",
+        "price": 9000,
+        "required_level_index": 13,
+        "shop_weight": 12
+    },
+    "2041": {
+        "name": "魔晶",
+        "type": "材料",
+        "rank": "地品",
+        "description": "魔气凝结的晶体，炼制魔道丹药的辅材（世界事件掉落）。",
+        "price": 6000,
+        "required_level_index": 13,
+        "shop_weight": 15
+    },
+    "2042": {
+        "name": "天魔精华",
+        "type": "材料",
+        "rank": "帝品",
+        "description": "域外天魔消散后残留的本源精华，传说级炼丹材料（世界事件掉落）。",
+        "price": 120000,
+        "required_level_index": 28,
+        "shop_weight": 5
+    },
+    "2043": {
+        "name": "混沌石",
+        "type": "材料",
+        "rank": "帝品",
+        "description": "开天辟地时残留的混沌之石，蕴含混沌之力（世界事件掉落）。",
+        "price": 90000,
+        "required_level_index": 28,
+        "shop_weight": 5
+    },
+    "2044": {
+        "name": "仙灵草",
+        "type": "材料",
+        "rank": "仙品",
+        "description": "仙灵之气孕育的灵草，可炼制仙品丹药（世界事件掉落）。",
+        "price": 150000,
+        "required_level_index": 28,
+        "shop_weight": 3
+    },
+    "2045": {
+        "name": "仙器碎片",
+        "type": "材料",
+        "rank": "帝品",
+        "description": "上古仙器崩碎后的残片，可重铸或熔炼（世界事件掉落）。",
+        "price": 80000,
+        "required_level_index": 28,
+        "shop_weight": 6
     }
 }

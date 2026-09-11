@@ -78,3 +78,108 @@ DEFAULT_DEATH_CONFIG = {
 DEATH_CONFIG = {
     "death_config": dict(DEFAULT_DEATH_CONFIG),
 }
+
+
+# ===== 世界事件系统（批次4：替代历练系统）=====
+# 完整的战役模板以 config/world_events.json 为准；
+# 这里的 event_templates 只是「配置文件丢失」时的兜底，保证事件系统仍可运行。
+DEFAULT_WORLD_EVENT_CONFIG = {
+    "auto_generate": True,               # 是否自动生成世界事件
+    "auto_interval_minutes": [120, 240],  # 自动生成间隔（分钟，取区间内随机值）
+    "max_participants": 10,               # 单场事件报名人数上限
+    "min_participants": 1,                 # 报名人数不足则取消事件
+    "signup_duration_seconds": 300,        # 报名时长（秒）
+    "death_penalty_reward_rate": 0.2,      # 阵亡（未彻底陨落）玩家的奖励保留比例
+    "auto_tier_weights": {                 # 自动生成时各难度权重
+        "low_tier": 40,
+        "mid_tier": 30,
+        "high_tier": 20,
+        "epic_tier": 10,
+    },
+    "admin_users": [],      # 可手动创建事件的管理员用户ID（批次5）
+    "broadcast_groups": [],  # 事件广播/生成目标群，留空则使用插件白名单群
+}
+
+_FALLBACK_WORLD_EVENT_TEMPLATES = {
+    "low_tier": [
+        {
+            "id": "low_001",
+            "name": "妖兽围城",
+            "tier": "低阶",
+            "description": "凡俗王城外妖兽突袭，需要修士驰援",
+            "min_level": 1,
+            "max_level": 12,
+            "base_death_rate": 0.15,
+            "duration_minutes": 30,
+            "weight": 100,
+            "bounty_tag": "world_event_low",
+            "rewards": {
+                "spirit_stone": [500, 1000],
+                "exp": [1000, 2000],
+                "materials": [{"name": "妖兽内丹", "rate": 0.30}],
+            },
+        }
+    ],
+    "mid_tier": [
+        {
+            "id": "mid_001",
+            "name": "魔修入侵",
+            "tier": "中阶",
+            "description": "魔道大军入侵修仙界，各大宗门紧急召集弟子应战",
+            "min_level": 13,
+            "max_level": 18,
+            "base_death_rate": 0.35,
+            "duration_minutes": 45,
+            "weight": 100,
+            "bounty_tag": "world_event_mid",
+            "rewards": {
+                "spirit_stone": [3000, 6000],
+                "exp": [10000, 20000],
+                "materials": [{"name": "魔核", "rate": 0.40}],
+            },
+        }
+    ],
+    "high_tier": [
+        {
+            "id": "high_001",
+            "name": "上古遗迹现世",
+            "tier": "高阶",
+            "description": "上古大能的洞府重现人间，机缘与危机并存",
+            "min_level": 19,
+            "max_level": 27,
+            "base_death_rate": 0.50,
+            "duration_minutes": 60,
+            "weight": 100,
+            "bounty_tag": "world_event_high",
+            "rewards": {
+                "spirit_stone": [20000, 40000],
+                "exp": [50000, 100000],
+                "materials": [{"name": "九转仙草", "rate": 0.30}],
+            },
+        }
+    ],
+    "epic_tier": [
+        {
+            "id": "epic_001",
+            "name": "域外天魔降临",
+            "tier": "史诗",
+            "description": "域外天魔破开位面壁垒，修仙界面临灭顶之灾",
+            "min_level": 28,
+            "max_level": 36,
+            "base_death_rate": 0.70,
+            "duration_minutes": 90,
+            "weight": 100,
+            "bounty_tag": "world_event_epic",
+            "rewards": {
+                "spirit_stone": [100000, 200000],
+                "exp": [500000, 1000000],
+                "materials": [{"name": "九转仙草", "rate": 0.45}],
+            },
+        }
+    ],
+}
+
+WORLD_EVENT_CONFIG = {
+    "world_event_config": dict(DEFAULT_WORLD_EVENT_CONFIG),
+    "event_templates": _FALLBACK_WORLD_EVENT_TEMPLATES,
+}

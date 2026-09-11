@@ -350,7 +350,7 @@ class PlayerHandler:
             yield event.plain_result("道友已在闭关中，请勿重复进入。")
             return
         
-        # 检查是否在其他活动中（历练、秘境探索等）
+        # 检查是否在其他活动中（秘境探索、宗门任务等）
         user_cd = await self.db.ext.get_user_cd(player.user_id)
         if user_cd and user_cd.type != UserStatus.IDLE:
             current_status = UserStatus.get_name(user_cd.type)
@@ -560,7 +560,7 @@ class PlayerHandler:
             return
 
         if player.state != "空闲":
-            yield event.plain_result("❌ 只有处于空闲状态时才能弃道重修。请先结束闭关/历练等活动。")
+            yield event.plain_result("❌ 只有处于空闲状态时才能弃道重修。请先结束闭关/秘境探索等活动。")
             return
 
         loan = await self.db.ext.get_active_loan(player.user_id)

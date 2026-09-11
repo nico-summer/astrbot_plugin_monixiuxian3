@@ -14,7 +14,7 @@ from .combat_handlers import CombatHandlers
 from .ranking_handlers import RankingHandlers
 
 from .rift_handlers import RiftHandlers
-from .adventure_handlers import AdventureHandlers
+from .world_event_handlers import WorldEventHandlers
 from .alchemy_handlers import AlchemyHandlers
 from .commission_handlers import CommissionHandlers
 from .impart_handlers import ImpartHandlers
@@ -45,7 +45,7 @@ __all__ = [
     "CombatHandlers",
     "RankingHandlers",
     "RiftHandlers",
-    "AdventureHandlers",
+    "WorldEventHandlers",
     "AlchemyHandlers",
     "CommissionHandlers",
     "ImpartHandlers",

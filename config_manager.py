@@ -3,7 +3,10 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from astrbot.api import logger
-from .data.default_configs import SECT_CONFIG, BOSS_CONFIG, RIFT_CONFIG, ALCHEMY_CONFIG, DEATH_CONFIG
+from .data.default_configs import (
+    SECT_CONFIG, BOSS_CONFIG, RIFT_CONFIG, ALCHEMY_CONFIG, DEATH_CONFIG,
+    WORLD_EVENT_CONFIG, DEFAULT_WORLD_EVENT_CONFIG,
+)
 
 class ConfigManager:
     """配置管理器，加载境界、物品、武器和丹药配置"""
@@ -25,6 +28,8 @@ class ConfigManager:
         self.rift_config: Dict[str, Any] = {}
         self.alchemy_config: Dict[str, Any] = {}
         self.death_config: Dict[str, Any] = {}  # 死亡系统配置（批次1）
+        self.world_event_config: Dict[str, Any] = {}  # 世界事件配置（批次4）
+        self.world_event_templates: Dict[str, List[dict]] = {}  # 世界事件模板（批次4）
         
         self._load_all()
 
@@ -120,6 +125,11 @@ class ConfigManager:
         self.alchemy_config = self._load_config_with_default(config_dir / "alchemy_config.json", ALCHEMY_CONFIG)
         self.death_config = self._load_config_with_default(config_dir / "death_config.json", DEATH_CONFIG)
         self.alchemy_recipes = self._load_items_data(config_dir / "alchemy_recipes.json")
+        # 世界事件（批次4）：配置 + 事件模板
+        self.world_event_config = self._load_config_with_default(
+            config_dir / "world_events.json", WORLD_EVENT_CONFIG
+        )
+        self.world_event_templates = self._extract_world_event_templates(self.world_event_config)
         
         # 加载游戏配置（包含各系统的硬编码参数）
         self.game_config = self._load_config_with_default(config_dir / "game_config.json", {})
@@ -130,7 +140,7 @@ class ConfigManager:
             f"配置管理器初始化完成，"
             f"加载了 {len(self.level_data)} 个灵修境界配置，"
             f"{len(self.body_level_data)} 个体修境界配置，"
-            f"以及新系统配置 (宗门/Boss/秘境/炼丹)"
+            f"以及新系统配置 (宗门/Boss/秘境/炼丹/世界事件)"
         )
     
     def get_death_config(self) -> Dict[str, Any]:
@@ -159,6 +169,62 @@ class ConfigManager:
             return result
 
         return default
+
+    # ===== 世界事件系统（批次4） =====
+
+    def _extract_world_event_templates(self, config: Any) -> Dict[str, List[dict]]:
+        """提取事件模板（兼容不同配置文件结构，缺失时回退内置兜底模板）"""
+        templates: Dict[str, List[dict]] = {}
+        if isinstance(config, dict):
+            raw = config.get("event_templates")
+            if isinstance(raw, dict):
+                for tier_key, tier_templates in raw.items():
+                    if isinstance(tier_templates, list) and tier_templates:
+                        valid = [t for t in tier_templates if isinstance(t, dict)]
+                        if valid:
+                            templates[tier_key] = valid
+        if templates:
+            return templates
+
+        fallback = WORLD_EVENT_CONFIG.get("event_templates", {})
+        return {key: list(value) for key, value in fallback.items() if value}
+
+    def get_world_event_config(self) -> Dict[str, Any]:
+        """获取世界事件核心参数（兼容「嵌套 world_event_config」与「扁平结构」两种写法）
+
+        优先级：嵌套格式 {"world_event_config": {...}} > 扁平格式 > 内置默认值
+        """
+        default = dict(DEFAULT_WORLD_EVENT_CONFIG)
+        config = self.world_event_config if isinstance(self.world_event_config, dict) else {}
+        if not config:
+            return default
+
+        nested = config.get("world_event_config")
+        if isinstance(nested, dict) and nested:
+            result = dict(default)
+            result.update({k: v for k, v in nested.items() if v is not None})
+            return result
+
+        # 回退到扁平格式（直接包含配置项）
+        result = dict(default)
+        result.update({k: v for k, v in config.items() if k in default and v is not None})
+        return result
+
+    def get_world_event_templates(self) -> Dict[str, List[dict]]:
+        """获取世界事件模板（key 为难度分组，如 low_tier / mid_tier）"""
+        if self.world_event_templates:
+            return self.world_event_templates
+        return self._extract_world_event_templates(None)
+
+    def find_world_event_template(self, template_id) -> Optional[dict]:
+        """按模板ID查找事件模板，未找到返回 None"""
+        if template_id is None or template_id == "":
+            return None
+        for tier_templates in self.get_world_event_templates().values():
+            for template in tier_templates or []:
+                if str(template.get("id")) == str(template_id):
+                    return template
+        return None
 
     # ===== 炼丹系统（批次2） =====
 
