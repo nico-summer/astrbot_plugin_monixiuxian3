@@ -16,6 +16,7 @@ from .handlers import (
     RiftHandlers, WorldEventHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
     BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
+    CommissionHandlers,
 )
 from .managers import (
     CombatManager, SectManager, BossManager, RiftManager,
