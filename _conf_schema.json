@@ -98,6 +98,54 @@
         "type": "int",
         "default": 100,
         "hint": "库存=物品权重/基数。基数越大，库存越少。"
+      },
+      "SHOP_REFRESH_DAILY_LIMIT": {
+        "description": "商店每日刷新次数上限",
+        "type": "int",
+        "default": 5,
+        "hint": "每个玩家每天可以主动刷新货架的次数上限。"
+      },
+      "SHOP_REFRESH_FREE_TIMES": {
+        "description": "商店每日免费刷新次数",
+        "type": "int",
+        "default": 1,
+        "hint": "每天前几次刷新不消耗灵石，默认第一次免费，避免新手刷不起。"
+      },
+      "SHOP_REFRESH_COST_BASE": {
+        "description": "刷新消耗基数",
+        "type": "int",
+        "default": 50,
+        "hint": "单次刷新消耗 = 基数 × 刷新消耗倍率^境界索引。"
+      },
+      "SHOP_REFRESH_COST_RATE": {
+        "description": "刷新消耗倍率",
+        "type": "float",
+        "default": 1.3,
+        "hint": "每提升一个境界索引，刷新消耗乘以该倍率。1.3 与装备价格曲线基本同步。"
+      },
+      "SHOP_FIT_ITEM_COUNT": {
+        "description": "货架契合槽数量",
+        "type": "int",
+        "default": 2,
+        "hint": "每次生成货架时，强制上架几件与玩家当前境界档位相匹配的物品。"
+      },
+      "SHOP_FILL_TIER_RANGE": {
+        "description": "补充槽向下取几档",
+        "type": "int",
+        "default": 2,
+        "hint": "契合槽之外的商品，最多向下取几个品质档位。数值越小，货架越集中在当前境界；越大越杂。"
+      },
+      "SHOP_FIT_TIER_WEIGHT_BONUS": {
+        "description": "契合槽品质权重加成",
+        "type": "float",
+        "default": 3.0,
+        "hint": "当前境界档位物品的抽取权重倍率，数值越大越容易刷出对应当前修为的物品。"
+      },
+      "SHOP_TOP_TIER_RANKS": {
+        "description": "永不上架的顶级品质",
+        "type": "list",
+        "default": ["仙品", "神品", "混元先天"],
+        "hint": "这些品质永远不出现在商店货架上，只能通过世界Boss、秘境等途径获取。"
       }
     }
   },

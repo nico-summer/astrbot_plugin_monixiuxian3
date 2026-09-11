@@ -10,12 +10,284 @@ from astrbot.api import AstrBotConfig, logger
 from ..config_manager import ConfigManager
 from ..models import Item
 
+# ===== 境界货架分层 =====
+# 品质 -> 档位（0~8）。同档位视为同级品质（珍品≈灵品、圣品≈皇品、神品≈仙品）
+RANK_TIERS = {
+    '凡品': 0, '灵品': 1, '珍品': 1, '地品': 2, '天品': 3,
+    '皇品': 4, '圣品': 4, '帝品': 5, '道品': 6,
+    '仙品': 7, '神品': 7, '混元先天': 8,
+}
+TIER_NAMES = ['凡品', '灵品', '地品', '天品', '皇品', '帝品', '道品', '仙品', '混元先天']
+# 物品缺少 required_level_index 字段时，按品质兜底一个最低境界
+RANK_LEVEL_FALLBACK = {
+    '凡品': 0, '灵品': 3, '珍品': 3, '地品': 10, '天品': 13,
+    '皇品': 16, '圣品': 16, '帝品': 22, '道品': 25,
+    '仙品': 31, '神品': 31, '混元先天': 35,
+}
+# 顶级品质：永不上架，只能靠 Boss / 秘境获取
+DEFAULT_TOP_TIER_RANKS = ['仙品', '神品', '混元先天']
+# 阁楼 ID -> 池子获取方法名
+PAVILION_GETTERS = {
+    'pill_pavilion': 'get_pills_for_display',
+    'weapon_pavilion': 'get_weapons_for_display',
+    'treasure_pavilion': 'get_all_items_for_display',
+}
+PAVILION_LABELS = {
+    'pill_pavilion': '丹阁',
+    'weapon_pavilion': '器阁',
+    'treasure_pavilion': '百宝阁',
+}
+
 class ShopManager:
     """商店管理器，负责商店物品生成、刷新和购买"""
 
     def __init__(self, config: AstrBotConfig, config_manager: ConfigManager):
         self.config = config
         self.config_manager = config_manager
+
+    # ===== 配置读取 =====
+    def _cfg(self, key: str, default=None):
+        """读取插件配置。
+
+        AstrBot 的「核心数值配置」是放在 VALUES 分组下的嵌套结构，
+        这里优先从 VALUES 取，再回退到顶层取值和默认值，
+        避免直接 config.get("KEY") 拿到 None 而永远走默认值。
+        """
+        try:
+            values = self.config.get("VALUES")
+        except Exception:
+            values = None
+        if isinstance(values, dict) and values.get(key) is not None:
+            return values[key]
+        try:
+            value = self.config.get(key)
+        except Exception:
+            value = None
+        return default if value is None else value
+
+    # ===== 境界分层（公共货架） =====
+    def get_item_tier(self, item: Dict) -> int:
+        """物品的品质档位（0~8）"""
+        data = item.get('data') or item
+        return RANK_TIERS.get(data.get('rank', '凡品'), 0)
+
+    def get_item_required_level(self, item: Dict) -> int:
+        """物品的需求境界索引，缺失时按品质兜底"""
+        data = item.get('data') or item
+        level = data.get('required_level_index')
+        if level is None:
+            level = RANK_LEVEL_FALLBACK.get(data.get('rank', '凡品'), 0)
+        try:
+            return int(level)
+        except (TypeError, ValueError):
+            return 0
+
+    def get_top_tier_ranks(self) -> set:
+        """顶级品质名单（不上架）"""
+        ranks = self._cfg("SHOP_TOP_TIER_RANKS", DEFAULT_TOP_TIER_RANKS)
+        if not isinstance(ranks, (list, tuple, set)) or not ranks:
+            ranks = DEFAULT_TOP_TIER_RANKS
+        return set(ranks)
+
+    def is_top_tier(self, item: Dict) -> bool:
+        data = item.get('data') or item
+        return data.get('rank', '凡品') in self.get_top_tier_ranks()
+
+    def get_pavilion_pool(self, pavilion_id: str) -> List[Dict]:
+        """获取阁楼的全部可售物品（价格>0 且商店权重大于 0）"""
+        getter = getattr(self, PAVILION_GETTERS.get(pavilion_id, ''), None)
+        if not getter:
+            return []
+        pool = []
+        for item in getter(0):
+            data = item.get('data') or {}
+            if item.get('price', 0) <= 0:
+                continue
+            try:
+                weight = float(data.get('shop_weight') or 0)
+            except (TypeError, ValueError):
+                weight = 0.0
+            if weight <= 0:
+                continue
+            pool.append(item)
+        return pool
+
+    def get_shelf_tier(self, pavilion_id: str, level_index: int) -> int:
+        """玩家在该阁楼能看到的最高品质档位。
+
+        顶级品质不上架，因此高境界玩家会自动下探到次一级品质档。
+        """
+        pool = [it for it in self.get_pavilion_pool(pavilion_id) if not self.is_top_tier(it)]
+        if not pool:
+            return 0
+        usable = [it for it in pool if self.get_item_required_level(it) <= level_index]
+        if not usable:
+            usable = pool
+        return max(self.get_item_tier(it) for it in usable)
+
+    def get_shelf_id(self, pavilion_id: str, level_index: int) -> str:
+        """公共货架 ID：同一境界的玩家共享同一个货架"""
+        return f"{pavilion_id}:t{self.get_shelf_tier(pavilion_id, level_index)}"
+
+    def get_shelf_name(self, pavilion_id: str, level_index: int) -> str:
+        """货架展示名，例如「器阁·皇品」"""
+        tier = self.get_shelf_tier(pavilion_id, level_index)
+        tier = min(max(tier, 0), len(TIER_NAMES) - 1)
+        return f"{PAVILION_LABELS.get(pavilion_id, pavilion_id)}·{TIER_NAMES[tier]}"
+
+    def _wrap_for_choice(self, items: List[Dict], bonus: float = 1.0) -> List[Dict]:
+        """包一层用于加权抽样的结构（权重下限避免稀有物永不出货）"""
+        wrapped = []
+        for item in items:
+            try:
+                weight = float((item.get('data') or {}).get('shop_weight') or 0)
+            except (TypeError, ValueError):
+                weight = 0.0
+            extra = float(item.get('bonus', 1.0) or 1.0)
+            wrapped.append({'weight': max(weight, 1.0) * bonus * extra, 'src': item.get('src', item)})
+        return wrapped
+
+    def _build_shop_items(self, selected: List[Dict], shelf_id: str, stock_overrides: Optional[Dict[str, int]] = None) -> List[Dict]:
+        """把抽中的物品包装成货架条目（含折扣/库存/短码）"""
+        discount_min = float(self._cfg("SHOP_DISCOUNT_MIN", 0.8))
+        discount_max = float(self._cfg("SHOP_DISCOUNT_MAX", 1.2))
+        if discount_max < discount_min:
+            discount_min, discount_max = discount_max, discount_min
+
+        result = []
+        for item in selected:
+            discount = random.uniform(discount_min, discount_max)
+            try:
+                weight = float((item.get('data') or {}).get('shop_weight') or 0)
+            except (TypeError, ValueError):
+                weight = 0.0
+            stock = None
+            if stock_overrides:
+                stock = stock_overrides.get(item['name'])
+            if stock is None:
+                stock = self._calculate_stock(int(max(weight, 1.0)))
+            result.append({
+                'id': item.get('id') or (item.get('data') or {}).get('id', item['name']),
+                'name': item['name'], 'type': item['type'], 'rank': item['rank'],
+                'original_price': item['price'], 'discount': discount,
+                'price': int(item['price'] * discount), 'stock': stock,
+                'data': item.get('data', {})
+            })
+        self.ensure_items_have_market_ids(result, shelf_id)
+        return result
+
+    def generate_shelf_items(self, pavilion_id: str, level_index: int, count: int) -> List[Dict]:
+        """按玩家境界生成货架。
+
+        规则：
+        - 只上架「玩家当前可用」的物品，且品质最高到当前档位
+        - 顶级品质（仙品/神品/混元先天）永不上架
+        - 其中 1~2 件为契合槽（当前档位），其余从当前档位与低一档补齐
+        """
+        pool = [it for it in self.get_pavilion_pool(pavilion_id) if not self.is_top_tier(it)]
+        if not pool:
+            return []
+
+        tier = self.get_shelf_tier(pavilion_id, level_index)
+        usable = [it for it in pool if self.get_item_required_level(it) <= level_index] or pool
+
+        fit = [it for it in usable if self.get_item_tier(it) == tier]
+        if not fit:
+            # 兜底：当前档位没有可用物品时，取池子里品质最高的一档
+            tier = max(self.get_item_tier(x) for x in usable)
+            fit = [it for it in usable if self.get_item_tier(it) == tier]
+        # 补充槽只向下取有限档位，避免低阶凡品刷屏占满货架
+        try:
+            fill_range = max(1, int(self._cfg("SHOP_FILL_TIER_RANGE", 2)))
+        except (TypeError, ValueError):
+            fill_range = 2
+        lower = [it for it in usable if tier - fill_range <= self.get_item_tier(it) < tier]
+        if not lower:
+            lower = [it for it in usable if self.get_item_tier(it) < tier]
+
+        try:
+            bonus = float(self._cfg("SHOP_FIT_TIER_WEIGHT_BONUS", 3.0))
+        except (TypeError, ValueError):
+            bonus = 3.0
+
+        selected: List[Dict] = []
+        chosen_ids = set()
+
+        try:
+            fit_quota = int(self._cfg("SHOP_FIT_ITEM_COUNT", 2))
+        except (TypeError, ValueError):
+            fit_quota = 2
+        fit_count = max(0, min(fit_quota, len(fit), count))
+        for chosen in self._weighted_random_choice(self._wrap_for_choice(fit, bonus), fit_count):
+            selected.append(chosen['src'])
+            chosen_ids.add(id(chosen['src']))
+
+        fit_names = {it['name'] for it in selected}
+
+        remaining = count - len(selected)
+        if remaining > 0:
+            # 越接近当前档位权重越高：次一档 1.0，次二档 0.4，依次递减
+            rest = []
+            for item in lower:
+                if id(item) in chosen_ids:
+                    continue
+                gap = tier - self.get_item_tier(item)
+                rest.append({'weight': None, 'src': item, 'bonus': 0.4 ** max(0, gap - 1)})
+            if not rest:
+                for item in fit:
+                    if id(item) not in chosen_ids:
+                        rest.append({'weight': None, 'src': item, 'bonus': 1.0})
+            for chosen in self._weighted_random_choice(self._wrap_for_choice(rest), remaining):
+                selected.append(chosen['src'])
+
+        # 契合槽限量 1 件（人人抢手），补充槽 2~3 件（管够）
+        stock_overrides = {
+            it['name']: (1 if it['name'] in fit_names else random.randint(2, 3))
+            for it in selected
+        }
+        return self._build_shop_items(selected, f"{pavilion_id}:t{tier}", stock_overrides)
+
+    # ===== 刷新消耗 =====
+    def get_refresh_cost(self, level_index: int) -> int:
+        """消耗型刷新的单次灵石成本，随境界指数递增"""
+        try:
+            base = float(self._cfg("SHOP_REFRESH_COST_BASE", 50))
+            rate = float(self._cfg("SHOP_REFRESH_COST_RATE", 1.30))
+        except (TypeError, ValueError):
+            base, rate = 50.0, 1.30
+        rate = min(max(rate, 1.0), 3.0)
+        return max(1, int(base * (rate ** max(0, int(level_index)))))
+
+    def get_auto_refresh_hours(self) -> int:
+        """自动刷新间隔（小时），0 表示不自动刷新"""
+        try:
+            return max(0, int(self._cfg("PAVILION_REFRESH_HOURS", 6)))
+        except (TypeError, ValueError):
+            return 6
+
+    def get_pavilion_count(self, pavilion_id: str) -> int:
+        """各阁楼货架展示数量"""
+        key, default = {
+            'pill_pavilion': ("PAVILION_PILL_COUNT", 10),
+            'weapon_pavilion': ("PAVILION_WEAPON_COUNT", 10),
+            'treasure_pavilion': ("PAVILION_TREASURE_COUNT", 15),
+        }.get(pavilion_id, ("PAVILION_TREASURE_COUNT", 15))
+        try:
+            return max(1, int(self._cfg(key, default)))
+        except (TypeError, ValueError):
+            return default
+
+    def get_daily_refresh_limit(self) -> int:
+        try:
+            return max(0, int(self._cfg("SHOP_REFRESH_DAILY_LIMIT", 5)))
+        except (TypeError, ValueError):
+            return 5
+
+    def get_free_refreshes(self) -> int:
+        try:
+            return max(0, int(self._cfg("SHOP_REFRESH_FREE_TIMES", 1)))
+        except (TypeError, ValueError):
+            return 1
 
     def _format_required_level(self, level_index: int) -> str:
         """同时展示灵修/体修的需求境界名称"""
@@ -149,7 +421,12 @@ class ShopManager:
             库存数量（最小为1）
         """
         # 获取库存计算基数，默认100
-        stock_divisor = self.config.get("SHOP_STOCK_DIVISOR", 100)
+        try:
+            stock_divisor = int(self._cfg("SHOP_STOCK_DIVISOR", 100))
+        except (TypeError, ValueError):
+            stock_divisor = 100
+        if stock_divisor <= 0:
+            stock_divisor = 100
 
         # 库存 = 权重 / 基数，向上取整，最小为1
         stock = max(1, (weight + stock_divisor - 1) // stock_divisor)
@@ -225,8 +502,10 @@ class ShopManager:
         selected_items = self._weighted_random_choice(all_items, count)
 
         # 获取折扣配置
-        discount_min = self.config.get("SHOP_DISCOUNT_MIN", 0.8)
-        discount_max = self.config.get("SHOP_DISCOUNT_MAX", 1.2)
+        discount_min = float(self._cfg("SHOP_DISCOUNT_MIN", 0.8))
+        discount_max = float(self._cfg("SHOP_DISCOUNT_MAX", 1.2))
+        if discount_max < discount_min:
+            discount_min, discount_max = discount_max, discount_min
 
         # 生成商店物品
         shop_items = []
@@ -255,31 +534,22 @@ class ShopManager:
     def should_refresh_shop(self, last_refresh_time: int, refresh_hours: int = None) -> bool:
         """检查是否需要刷新"""
         if refresh_hours is None:
-            refresh_hours = self.config.get("SHOP_REFRESH_HOURS", 6)
+            refresh_hours = self._cfg("PAVILION_REFRESH_HOURS", 6)
         if refresh_hours <= 0:
             return False
         return (int(time.time()) - last_refresh_time) >= (refresh_hours * 3600)
 
     def generate_pavilion_items(self, item_getter, count: int, pavilion_id: str = 'pavilion') -> List[Dict]:
-        """生成阁楼物品列表（带库存和折扣）"""
+        """生成阁楼物品列表（全局池，保留给旧调用方）
+
+        ⚠️ 新版商店已改为按境界分层（见 generate_shelf_items），
+        本方法仅作为兼容保留。
+        """
         base_items = item_getter(count * 2)  # 获取更多以便随机选择
         selected = self._weighted_random_choice(
-            [{'weight': i.get('data', {}).get('shop_weight', 100), **i} for i in base_items], count
+            [{'weight': (i.get('data') or {}).get('shop_weight', 100), **i} for i in base_items], count
         )
-        discount_min = self.config.get("SHOP_DISCOUNT_MIN", 0.8)
-        discount_max = self.config.get("SHOP_DISCOUNT_MAX", 1.2)
-        result = []
-        for item in selected:
-            discount = random.uniform(discount_min, discount_max)
-            stock = self._calculate_stock(item.get('weight', 100))
-            result.append({
-                'id': item.get('id') or item.get('data', {}).get('id', item['name']),
-                'name': item['name'], 'type': item['type'], 'rank': item['rank'],
-                'original_price': item['price'], 'discount': discount,
-                'price': int(item['price'] * discount), 'stock': stock, 'data': item.get('data', {})
-            })
-        self.ensure_items_have_market_ids(result, pavilion_id)
-        return result
+        return self._build_shop_items(selected, pavilion_id)
 
     def get_pills_for_display(self, count: int) -> List[Dict]:
         """获取丹药列表用于丹阁展示"""
@@ -384,7 +654,7 @@ class ShopManager:
                 return {'id': pill.get('id', pill['name']), 'name': pill['name'], 'type': 'utility_pill', 'price': pill['price'], 'rank': pill.get('rank', '凡品'), 'data': pill}
         return None
 
-    def format_pavilion_display(self, pavilion_name: str, items: List[Dict], refresh_hours: int = 6, last_refresh: int = 0) -> str:
+    def format_pavilion_display(self, pavilion_name: str, items: List[Dict], refresh_hours: int = 6, last_refresh: int = 0, footer_lines: Optional[List[str]] = None) -> str:
         """格式化阁楼展示信息"""
         if not items:
             return f"{pavilion_name}暂无物品出售"
@@ -421,6 +691,8 @@ class ShopManager:
             if remaining > 0:
                 lines.append(f"\n下次刷新: {remaining // 3600}小时{(remaining % 3600) // 60}分钟后")
         lines.append(f"\n提示: 使用 '购买 [物品名/短码] [数量]' 购买物品")
+        if footer_lines:
+            lines.append("\n" + "\n".join(footer_lines))
         return "".join(lines)
 
     def _get_item_effect_short(self, item: Dict) -> str:

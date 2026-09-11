@@ -43,69 +43,182 @@ class ShopHandler:
             for user_id in access_control.get("SHOP_MANAGERS", [])
         }
 
-    async def _ensure_pavilion_refreshed(self, pavilion_id: str, item_getter, count: int) -> None:
-        """确保阁楼已刷新"""
-        last_refresh_time, current_items = await self.db.get_shop_data(pavilion_id)
-        if current_items:
-            updated = self.shop_manager.ensure_items_have_stock(current_items)
-            updated = self.shop_manager.ensure_items_have_market_ids(current_items, pavilion_id) or updated
+    PAVILION_LABELS = {
+        "pill_pavilion": "丹阁",
+        "weapon_pavilion": "器阁",
+        "treasure_pavilion": "百宝阁",
+    }
+    PAVILION_ALIASES = {
+        "丹阁": "pill_pavilion", "丹药": "pill_pavilion", "丹": "pill_pavilion",
+        "器阁": "weapon_pavilion", "武器": "weapon_pavilion", "器": "weapon_pavilion",
+        "百宝阁": "treasure_pavilion", "宝物": "treasure_pavilion", "百宝": "treasure_pavilion",
+    }
+
+    async def _load_pavilion(self, player: Player, pavilion_id: str):
+        """读取（必要时生成）玩家所属境界的公共货架
+
+        Returns:
+            (shelf_id, last_refresh_time, items)
+        """
+        shelf_id = self.shop_manager.get_shelf_id(pavilion_id, player.level_index)
+        last_refresh_time, items = await self.db.get_shop_data(shelf_id)
+        if items:
+            updated = self.shop_manager.ensure_items_have_stock(items)
+            updated = self.shop_manager.ensure_items_have_market_ids(items, shelf_id) or updated
             if updated:
-                await self.db.update_shop_data(pavilion_id, last_refresh_time, current_items)
-        refresh_hours = self.config.get("PAVILION_REFRESH_HOURS", 6)
-        if not current_items or self.shop_manager.should_refresh_shop(last_refresh_time, refresh_hours):
-            new_items = self.shop_manager.generate_pavilion_items(item_getter, count, pavilion_id)
-            await self.db.update_shop_data(pavilion_id, int(time.time()), new_items)
+                await self.db.update_shop_data(shelf_id, last_refresh_time, items)
+                await self.db.conn.commit()
 
-    async def handle_pill_pavilion(self, event: AstrMessageEvent):
+        refresh_hours = self.shop_manager.get_auto_refresh_hours()
+        if not items or self.shop_manager.should_refresh_shop(last_refresh_time, refresh_hours):
+            items = self.shop_manager.generate_shelf_items(
+                pavilion_id, player.level_index, self.shop_manager.get_pavilion_count(pavilion_id)
+            )
+            last_refresh_time = int(time.time())
+            await self.db.update_shop_data(shelf_id, last_refresh_time, items)
+            await self.db.conn.commit()
+        return shelf_id, last_refresh_time, items
+
+    async def _refresh_footer(self, player: Player) -> list:
+        """货架页脚：今日剩余刷新次数与下次消耗"""
+        today = time.strftime("%Y-%m-%d")
+        used = await self.db.get_shop_refresh_count(player.user_id, today)
+        limit = self.shop_manager.get_daily_refresh_limit()
+        free = self.shop_manager.get_free_refreshes()
+        remaining = max(0, limit - used)
+
+        lines = [f"🔄 今日刷新：剩余 {remaining}/{limit} 次"]
+        if remaining <= 0:
+            lines.append("   今日次数已用完，明日恢复")
+        elif used < free:
+            lines.append("   本次刷新免费（今日首发）")
+        else:
+            cost = self.shop_manager.get_refresh_cost(player.level_index)
+            lines.append(f"   下次消耗：{cost:,} 灵石")
+        lines.append("   刷新商店 <丹阁|器阁|百宝阁> → 立即刷新货架")
+        return lines
+
+    async def _render_pavilion(self, player: Player, pavilion_id: str, event: AstrMessageEvent):
+        """渲染某个阁楼货架"""
+        label = self.PAVILION_LABELS.get(pavilion_id, pavilion_id)
+        _, last_refresh, items = await self._load_pavilion(player, pavilion_id)
+        if not items:
+            yield event.plain_result(f"{label}暂无物品出售。")
+            return
+        footer = await self._refresh_footer(player)
+        display = self.shop_manager.format_pavilion_display(
+            self.shop_manager.get_shelf_name(pavilion_id, player.level_index),
+            items,
+            self.shop_manager.get_auto_refresh_hours(),
+            last_refresh,
+            footer,
+        )
+        yield event.plain_result(display)
+
+    @player_required
+    async def handle_pill_pavilion(self, player: Player, event: AstrMessageEvent):
         """处理丹阁命令 - 展示丹药列表"""
-        count = self.config.get("PAVILION_PILL_COUNT", 10)
-        await self._ensure_pavilion_refreshed("pill_pavilion", self.shop_manager.get_pills_for_display, count)
-        last_refresh, items = await self.db.get_shop_data("pill_pavilion")
-        if not items:
-            yield event.plain_result("丹阁暂无丹药出售。")
-            return
-        refresh_hours = self.config.get("PAVILION_REFRESH_HOURS", 6)
-        display = self.shop_manager.format_pavilion_display("丹阁", items, refresh_hours, last_refresh)
-        yield event.plain_result(display)
+        async for r in self._render_pavilion(player, "pill_pavilion", event):
+            yield r
 
-    async def handle_weapon_pavilion(self, event: AstrMessageEvent):
+    @player_required
+    async def handle_weapon_pavilion(self, player: Player, event: AstrMessageEvent):
         """处理器阁命令 - 展示武器列表"""
-        count = self.config.get("PAVILION_WEAPON_COUNT", 10)
-        await self._ensure_pavilion_refreshed("weapon_pavilion", self.shop_manager.get_weapons_for_display, count)
-        last_refresh, items = await self.db.get_shop_data("weapon_pavilion")
-        if not items:
-            yield event.plain_result("器阁暂无武器出售。")
-            return
-        refresh_hours = self.config.get("PAVILION_REFRESH_HOURS", 6)
-        display = self.shop_manager.format_pavilion_display("器阁", items, refresh_hours, last_refresh)
-        yield event.plain_result(display)
+        async for r in self._render_pavilion(player, "weapon_pavilion", event):
+            yield r
 
-    async def handle_treasure_pavilion(self, event: AstrMessageEvent):
+    @player_required
+    async def handle_treasure_pavilion(self, player: Player, event: AstrMessageEvent):
         """处理百宝阁命令 - 展示所有物品"""
-        count = self.config.get("PAVILION_TREASURE_COUNT", 15)
-        await self._ensure_pavilion_refreshed("treasure_pavilion", self.shop_manager.get_all_items_for_display, count)
-        last_refresh, items = await self.db.get_shop_data("treasure_pavilion")
-        if not items:
-            yield event.plain_result("百宝阁暂无物品出售。")
-            return
-        refresh_hours = self.config.get("PAVILION_REFRESH_HOURS", 6)
-        display = self.shop_manager.format_pavilion_display("百宝阁", items, refresh_hours, last_refresh)
-        yield event.plain_result(display)
+        async for r in self._render_pavilion(player, "treasure_pavilion", event):
+            yield r
 
-    async def _find_item_in_pavilions(self, item_name: str):
-        """在所有阁楼中查找物品"""
-        for pavilion_id in ["pill_pavilion", "weapon_pavilion", "treasure_pavilion"]:
-            last_refresh, items = await self.db.get_shop_data(pavilion_id)
-            if items:
-                updated = self.shop_manager.ensure_items_have_stock(items)
-                updated = self.shop_manager.ensure_items_have_market_ids(items, pavilion_id) or updated
-                if updated:
-                    await self.db.update_shop_data(pavilion_id, last_refresh, items)
-                for item in items:
-                    same_name = item.get('name') == item_name
-                    same_code = str(item.get('market_id', '')).upper() == item_name.strip().upper()
-                    if (same_name or same_code) and item.get('stock', 0) > 0:
-                        return pavilion_id, item
+    @player_required
+    async def handle_refresh_shop(self, player: Player, event: AstrMessageEvent, pavilion_name: str = ""):
+        """消耗灵石刷新当前境界的公共货架（每人每日限次）"""
+        target = (pavilion_name or "").strip()
+        if not target:
+            yield event.plain_result(
+                "请指定要刷新的阁楼。\n"
+                "用法：刷新商店 <丹阁|器阁|百宝阁>\n"
+                "示例：刷新商店 器阁"
+            )
+            return
+
+        pavilion_id = self.PAVILION_ALIASES.get(target)
+        if not pavilion_id:
+            yield event.plain_result(f"没有「{target}」这个阁楼。\n用法：刷新商店 <丹阁|器阁|百宝阁>")
+            return
+
+        label = self.PAVILION_LABELS[pavilion_id]
+        today = time.strftime("%Y-%m-%d")
+        limit = self.shop_manager.get_daily_refresh_limit()
+        used = await self.db.get_shop_refresh_count(player.user_id, today)
+        if used >= limit:
+            yield event.plain_result(
+                f"今日刷新次数已用完（{used}/{limit}）。\n"
+                "明日恢复，期间可等待每 "
+                f"{self.shop_manager.get_auto_refresh_hours()} 小时的自动刷新。"
+            )
+            return
+
+        free = self.shop_manager.get_free_refreshes()
+        cost = 0 if used < free else self.shop_manager.get_refresh_cost(player.level_index)
+        if cost > 0 and player.gold < cost:
+            yield event.plain_result(
+                f"灵石不足，刷新{label}需要 {cost:,} 灵石，你当前有 {player.gold:,} 灵石。"
+            )
+            return
+
+        if cost > 0:
+            await self.db.begin_immediate()
+            try:
+                fresh = await self.db.get_player_by_id(event.get_sender_id())
+                if not fresh or fresh.gold < cost:
+                    await self.db.conn.rollback()
+                    yield event.plain_result("灵石不足，刷新失败。")
+                    return
+                fresh.gold -= cost
+                await self.db.update_player(fresh)
+                await self.db.conn.commit()
+            except Exception as e:
+                await self.db.conn.rollback()
+                logger.error(f"刷新商店扣费异常: {e}")
+                raise
+
+        shelf_id = self.shop_manager.get_shelf_id(pavilion_id, player.level_index)
+        items = self.shop_manager.generate_shelf_items(
+            pavilion_id, player.level_index, self.shop_manager.get_pavilion_count(pavilion_id)
+        )
+        await self.db.update_shop_data(shelf_id, int(time.time()), items)
+        await self.db.conn.commit()
+        new_used = await self.db.increment_shop_refresh_count(player.user_id, today)
+
+        player = await self.db.get_player_by_id(event.get_sender_id())
+        remaining = max(0, limit - new_used)
+        header = (
+            f"✨ 已刷新【{self.shop_manager.get_shelf_name(pavilion_id, player.level_index)}】\n"
+            f"本次消耗：{cost:,} 灵石　剩余灵石：{player.gold:,}\n"
+            f"今日剩余刷新次数：{remaining}/{limit}\n"
+        )
+        yield event.plain_result(header + "\n" + self.shop_manager.format_pavilion_display(
+            self.shop_manager.get_shelf_name(pavilion_id, player.level_index),
+            items,
+            self.shop_manager.get_auto_refresh_hours(),
+            int(time.time()),
+            await self._refresh_footer(player),
+        ))
+
+    async def _find_item_in_pavilions(self, player: Player, item_name: str):
+        """在玩家所属境界的所有货架中查找物品"""
+        needle = (item_name or "").strip()
+        for pavilion_id in ("pill_pavilion", "weapon_pavilion", "treasure_pavilion"):
+            shelf_id, _, items = await self._load_pavilion(player, pavilion_id)
+            for item in items:
+                same_name = item.get('name') == needle
+                same_code = str(item.get('market_id', '')).upper() == needle.upper()
+                if (same_name or same_code) and item.get('stock', 0) > 0:
+                    return shelf_id, item
         return None, None
 
     @player_required
@@ -142,9 +255,13 @@ class ShopHandler:
 
         item_name = item_part
 
-        pavilion_id, target_item = await self._find_item_in_pavilions(item_name)
+        pavilion_id, target_item = await self._find_item_in_pavilions(player, item_name)
         if not target_item:
-            yield event.plain_result(f"无效的市场ID或物品名称: {item_name}\n请使用“市场”命令查看商品短码，或等待商店刷新。")
+            yield event.plain_result(
+                f"当前货架上没有「{item_name}」。\n"
+                "💡 使用「丹阁」「器阁」「百宝阁」查看你当前境界货架的物品与短码，\n"
+                "   或用「刷新商店 <阁楼>」消耗灵石立即换一批货。"
+            )
             return
 
         item_name = target_item['name']

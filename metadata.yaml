@@ -1,6 +1,6 @@
 name: astrbot_plugin_monixiuxian2_niko # 插件唯一标识
 display_name: 模拟修仙v2 # 插件展示名
-desc: 一款为 AstrBot 设计的、功能丰富的放置类修仙游戏插件。让你在聊天群中体验从凡人到大能的修行之路，工作摸鱼、畅聊吹水的同时亦可得道飞升！🆕 v3.5.6 修复：宗门每日任务跨天结算报 UNIQUE constraint failed（表主键改为 user_id+task_date，自动迁移老库），以及由此引发的「购买」等指令报 cannot start a transaction within a transaction！
-version: v3.5.6
+desc: 一款为 AstrBot 设计的、功能丰富的放置类修仙游戏插件。让你在聊天群中体验从凡人到大能的修行之路，工作摸鱼、畅聊吹水的同时亦可得道飞升！🆕 v3.5.7 商店改版：货架按境界分层（只卖你这个修为用得上的品质，同境界玩家共享货架），新增「刷新商店」消耗灵石主动换货（每人每日5次、首次免费、消耗随境界递增），仙品/神品/混元先天永不上架！
+version: v3.5.7
 author: n1ko
 repo: https://github.com/nico-summer/astrbot_plugin_monixiuxian2

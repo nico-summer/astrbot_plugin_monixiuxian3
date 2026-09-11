@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 31  # v31: 修复宗门每日任务表主键（user_id + task_date 复合主键）
+LATEST_DB_VERSION = 32  # v32: 商店境界货架 + 每人每日刷新次数
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -29,6 +29,27 @@ SECT_DAILY_TASKS_TABLE_SQL = """
         FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
     )
 """
+
+
+# 商店刷新次数：每个玩家每天一行，记录已消耗的刷新次数
+SHOP_REFRESH_USAGE_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS shop_refresh_usage (
+        user_id TEXT NOT NULL,
+        refresh_date TEXT NOT NULL,
+        refresh_count INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, refresh_date)
+    )
+"""
+
+
+async def repair_shop_refresh_usage_table(conn: aiosqlite.Connection) -> bool:
+    """确保 shop_refresh_usage 表存在（幂等）"""
+    async with conn.execute("PRAGMA table_info(shop_refresh_usage)") as cursor:
+        columns = await cursor.fetchall()
+    if columns:
+        return False
+    await conn.execute(SHOP_REFRESH_USAGE_TABLE_SQL)
+    return True
 
 
 async def repair_sect_daily_tasks_table(conn: aiosqlite.Connection) -> bool:
@@ -235,6 +256,9 @@ class MigrationManager:
             if await repair_sect_daily_tasks_table(self.conn):
                 await self.conn.commit()
                 logger.info("启动自检：sect_daily_tasks 表结构已修复")
+            if await repair_shop_refresh_usage_table(self.conn):
+                await self.conn.commit()
+                logger.info("启动自检：shop_refresh_usage 表已创建")
         except Exception as e:
             try:
                 await self.conn.rollback()
@@ -642,6 +666,8 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     """)
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_impart_user ON impart_info(user_id)")
     
+    await conn.execute(SHOP_REFRESH_USAGE_TABLE_SQL)
+
     # 创建用户CD表
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS user_cd (
@@ -1505,3 +1531,21 @@ async def _migrate_to_v31(conn: aiosqlite.Connection, config_manager: ConfigMana
         logger.info("v31迁移完成：sect_daily_tasks 结构已正确，无需重建")
 
     await conn.commit()
+
+
+@migration(32)
+async def _migrate_to_v32(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v32 - 商店境界货架与每日刷新次数"""
+    logger.info("开始迁移到v32：商店境界货架与每日刷新次数")
+
+    created = await repair_shop_refresh_usage_table(conn)
+    logger.info("shop_refresh_usage 表已创建" if created else "shop_refresh_usage 表已存在")
+
+    # 旧版全局货架（shop_id = xxx_pavilion）不再使用，清理掉避免占用空间；
+    # 新版货架 ID 形如 `pill_pavilion:t4`，按境界分段由同段位玩家共享。
+    await conn.execute(
+        "DELETE FROM shop WHERE shop_id IN ('pill_pavilion', 'weapon_pavilion', 'treasure_pavilion')"
+    )
+
+    await conn.commit()
+    logger.info("v32迁移完成：商店境界货架")

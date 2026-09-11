@@ -82,6 +82,8 @@ CMD_WEAPON_PAVILION = "器阁"
 CMD_TREASURE_PAVILION = "百宝阁"
 CMD_ITEM_INFO = "物品信息"
 CMD_BUY = "购买"
+CMD_REFRESH_SHOP = "刷新商店"
+CMD_REFRESH_SHOP_ALIASES = ("刷新坊市", "刷新货架")
 CMD_STORAGE_RING = "储物戒"
 CMD_STORE_ITEM = "存入"
 CMD_RETRIEVE_ITEM = "取出"
@@ -1030,6 +1032,18 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_treasure_pavilion(self, event: AstrMessageEvent):
         async for r in self.shop_handler.handle_treasure_pavilion(event):
+            yield r
+
+    @filter.command(CMD_REFRESH_SHOP, "消耗灵石刷新商店货架")
+    @require_whitelist
+    async def handle_refresh_shop(self, event: AstrMessageEvent, pavilion_name: str = ""):
+        async for r in self.shop_handler.handle_refresh_shop(event, pavilion_name):
+            yield r
+
+    @filter.command(CMD_REFRESH_SHOP_ALIASES[0], "刷新商店（同刷新商店）")
+    @require_whitelist
+    async def handle_refresh_shop_alias(self, event: AstrMessageEvent, pavilion_name: str = ""):
+        async for r in self.shop_handler.handle_refresh_shop(event, pavilion_name):
             yield r
 
     @filter.command(CMD_ITEM_INFO, "查看物品详细效果")

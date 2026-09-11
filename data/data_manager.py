@@ -452,3 +452,44 @@ class DataBase:
         except Exception:
             await self.conn.rollback()
             raise
+
+    # ===== 商店刷新次数（每人每日） =====
+
+    async def get_shop_refresh_count(self, user_id: str, refresh_date: str) -> int:
+        """查询某玩家在指定日期已使用的商店刷新次数
+
+        Args:
+            user_id: 玩家ID
+            refresh_date: 日期字符串，形如 '2026-09-11'
+
+        Returns:
+            已使用次数（表不存在或没有记录时返回 0）
+        """
+        try:
+            async with self.conn.execute(
+                "SELECT refresh_count FROM shop_refresh_usage WHERE user_id = ? AND refresh_date = ?",
+                (str(user_id), refresh_date)
+            ) as cursor:
+                row = await cursor.fetchone()
+            return int(row[0]) if row else 0
+        except Exception as e:
+            logger.warning(f"[shop] 读取刷新次数失败（按0处理）: {e}")
+            return 0
+
+    async def increment_shop_refresh_count(self, user_id: str, refresh_date: str) -> int:
+        """累加某玩家在指定日期的商店刷新次数
+
+        Returns:
+            累加后的次数
+        """
+        await self.conn.execute(
+            """
+            INSERT INTO shop_refresh_usage (user_id, refresh_date, refresh_count)
+            VALUES (?, ?, 1)
+            ON CONFLICT(user_id, refresh_date)
+            DO UPDATE SET refresh_count = refresh_count + 1
+            """,
+            (str(user_id), refresh_date)
+        )
+        await self.conn.commit()
+        return await self.get_shop_refresh_count(user_id, refresh_date)
