@@ -800,18 +800,26 @@ class SectManager:
 
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # 获取今日任务记录
-        cursor = await self.db.conn.execute(
-            "SELECT donated_stone, completed_adventure, harvested_farm, completed_rift FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
-            (user_id, today)
-        )
-        row = await cursor.fetchone()
+        # 读取今日任务记录（异常时降级显示全部未完成，保证面板可用）
+        try:
+            cursor = await self.db.conn.execute(
+                "SELECT donated_stone, completed_adventure, harvested_farm, completed_rift FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
+                (user_id, today)
+            )
+            row = await cursor.fetchone()
 
-        if row:
-            donated_stone, completed_adventure, harvested_farm, completed_rift = row
-        else:
-            # 创建今日记录（(user_id, task_date) 复合主键，每天一行）
-            await self._ensure_daily_task_row(user_id, today)
+            if row:
+                donated_stone, completed_adventure, harvested_farm, completed_rift = row
+            else:
+                # 创建今日记录（(user_id, task_date) 复合主键，每天一行）
+                await self._ensure_daily_task_row(user_id, today)
+                donated_stone = completed_adventure = harvested_farm = completed_rift = 0
+        except Exception as e:
+            try:
+                await self.db.conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"[宗门每日任务] 读取今日任务失败: {e}")
             donated_stone = completed_adventure = harvested_farm = completed_rift = 0
 
         # 定义任务列表
@@ -868,20 +876,25 @@ class SectManager:
         if not column_name:
             return False, 0
 
-        # 确保今日任务记录存在（(user_id, task_date) 复合主键，每天一行）
-        await self._ensure_daily_task_row(user_id, today)
-
-        # 原子标记完成：仅当该任务今日尚未完成时更新成功，避免重复发放贡献度
+        # 每日任务只是额外奖励：任何异常都不应让主指令（收获/完成探索/历练/捐献）失败
         try:
+            # 确保今日任务记录存在（(user_id, task_date) 复合主键，每天一行）
+            await self._ensure_daily_task_row(user_id, today)
+
+            # 原子标记完成：仅当该任务今日尚未完成时更新成功，避免重复发放贡献度
             cursor = await self.db.conn.execute(
                 f"UPDATE sect_daily_tasks SET {column_name} = 1 WHERE user_id = ? AND task_date = ? AND {column_name} = 0",
                 (user_id, today)
             )
             updated = cursor.rowcount
             await self.db.conn.commit()
-        except Exception:
-            await self.db.conn.rollback()
-            raise
+        except Exception as e:
+            try:
+                await self.db.conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"[宗门每日任务] 结算失败（已跳过本次奖励）: {e}")
+            return False, 0
 
         if not updated:
             # 今日该任务已完成

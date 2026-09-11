@@ -193,6 +193,7 @@ class MigrationManager:
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
                 await self.conn.commit()
                 logger.info(f"数据库已初始化到最新版本: v{LATEST_DB_VERSION}")
+                await self._selfcheck_tables()
                 return
 
         async with self.conn.execute("SELECT version FROM db_info") as cursor:
@@ -219,6 +220,27 @@ class MigrationManager:
             logger.info(f"数据库已升级到最新版本: v{LATEST_DB_VERSION}")
         else:
             logger.info("数据库已是最新版本，无需升级。")
+
+        await self._selfcheck_tables()
+
+    async def _selfcheck_tables(self):
+        """启动时的表结构自检（幂等）
+
+        只依赖 `db_info` 版本号是不够的：版本号可能已经被写成最新，
+        但库里的表结构仍是旧的（例如手动改库、拷贝数据、迁移中途失败）。
+        这里无论如何都校验并修复关键表结构，避免线上出现
+        "UNIQUE constraint failed: sect_daily_tasks.user_id" 之类的报错。
+        """
+        try:
+            if await repair_sect_daily_tasks_table(self.conn):
+                await self.conn.commit()
+                logger.info("启动自检：sect_daily_tasks 表结构已修复")
+        except Exception as e:
+            try:
+                await self.conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"启动自检修复 sect_daily_tasks 失败（不影响启动）: {e}")
 
 async def _create_all_tables_v1(conn: aiosqlite.Connection):
     """创建所有表 - v1，只保留玩家基础信息"""

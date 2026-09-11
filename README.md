@@ -489,6 +489,8 @@ astrbot_plugin_monixiuxian2/
 - 顺带修复由此引发的连锁故障：`购买` 等指令报 `cannot start a transaction within a transaction`
   （失败的写入语句残留事务未回滚，导致后续所有 `BEGIN IMMEDIATE` 指令持续失败）。
   现统一走自愈事务入口 `begin_immediate()`：检测到残留事务自动回滚并重试
+- 插件启动时新增**表结构自检**：即使版本号已是最新也会校验并修复该表结构
+- **每日任务结算静默降级**：结算异常只记日志并跳过奖励，不再拖垮「收获」「完成探索」等主指令
 
 **📦 数据库变更：**
 - 新增 v31 迁移：`sect_daily_tasks` 重建为 `(user_id, task_date)` 复合主键，
