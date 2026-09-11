@@ -1187,7 +1187,18 @@ class WorldEventManager:
     # ==================== 管理员功能（批次5） ====================
 
     def is_admin(self, user_id: str) -> bool:
-        """检查用户是否为管理员"""
+        """检查用户是否为管理员（优先从AstrBot配置读取）"""
+        # 优先从 AstrBot 配置读取
+        if self.config_manager and hasattr(self.config_manager, 'get'):
+            try:
+                astrbot_admins = self.config_manager.get("world_event_admin_users")
+                if astrbot_admins is not None:
+                    admin_list = [str(a) for a in (astrbot_admins if isinstance(astrbot_admins, list) else [])]
+                    return str(user_id) in admin_list
+            except Exception as e:
+                logger.warning(f"从 AstrBot 配置读取管理员列表失败: {e}")
+
+        # 从文件配置读取
         admin_list = self._config().get("admin_users", [])
         return str(user_id) in [str(uid) for uid in admin_list]
 
@@ -1216,7 +1227,20 @@ class WorldEventManager:
         if not self.is_admin(admin_id):
             return False, "⚠️ 你没有管理员权限", None
 
-        allowed_groups = self._config().get("broadcast_groups", [])
+        # 优先从 AstrBot 配置读取允许的群号列表
+        allowed_groups = []
+        if self.config_manager and hasattr(self.config_manager, 'get'):
+            try:
+                astrbot_groups = self.config_manager.get("world_event_broadcast_groups")
+                if astrbot_groups is not None:
+                    allowed_groups = [str(g) for g in (astrbot_groups if isinstance(astrbot_groups, list) else [])]
+            except Exception as e:
+                logger.warning(f"从 AstrBot 配置读取群号列表失败: {e}")
+
+        # 如果 AstrBot 配置没有，从文件配置读取
+        if not allowed_groups:
+            allowed_groups = self._config().get("broadcast_groups", [])
+
         if allowed_groups and str(group_id) not in [str(g) for g in allowed_groups]:
             return False, f"❌ 群号 {group_id} 不在允许列表中", None
 

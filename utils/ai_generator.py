@@ -8,6 +8,11 @@ AI文案生成器
 - OpenRouter (https://openrouter.ai/api/v1)
 - 其他兼容 OpenAI API 格式的服务
 
+配置优先级：
+1. AstrBot 配置系统（通过 config_manager）
+2. 插件配置文件（config/world_events.json）
+3. 内置默认值
+
 AI调用失败时自动降级为固定模板。
 """
 
@@ -31,34 +36,31 @@ class AIGenerator:
     支持 OpenAI 格式的通用 API，失败时降级为固定模板。
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, config_manager=None):
         """
         初始化AI生成器
 
         Args:
-            config: ai_config配置字典，包含：
-                - enable_ai_intro: 是否启用AI开场描述
-                - enable_ai_summary: 是否启用AI战斗总结
-                - ai_api_key: API密钥
-                - ai_model: 模型名称
-                  - OpenAI: gpt-4, gpt-3.5-turbo
-                  - DeepSeek: deepseek-chat
-                  - 硅基流动: Qwen/Qwen2.5-7B-Instruct, deepseek-ai/DeepSeek-V2.5 等
-                  - OpenRouter: openai/gpt-4, anthropic/claude-3-opus 等
-                - ai_base_url: API地址（必填）
-                  - OpenAI: https://api.openai.com/v1
-                  - DeepSeek: https://api.deepseek.com
-                  - 硅基流动: https://api.siliconflow.cn/v1
-                  - OpenRouter: https://openrouter.ai/api/v1
-                - fixed_fallback: AI失败时是否使用固定模板（默认true）
+            config: ai_config配置字典（来自 world_events.json）
+            config_manager: ConfigManager实例（从AstrBot配置读取，优先级更高）
+                如果提供，会尝试从 AstrBot 配置中读取：
+                - world_event_ai_enabled: 是否启用AI
+                - world_event_ai_api_key: API密钥
+                - world_event_ai_model: 模型名称
+                - world_event_ai_base_url: API地址
         """
-        self.config = config
-        self.enable_intro = config.get("enable_ai_intro", False)
-        self.enable_summary = config.get("enable_ai_summary", False)
-        self.api_key = config.get("ai_api_key", "")
-        self.model = config.get("ai_model", "gpt-3.5-turbo")
-        self.base_url = config.get("ai_base_url", "")
-        self.fixed_fallback = config.get("fixed_fallback", True)
+        self.config = config or {}
+        self.config_manager = config_manager
+
+        # 合并配置：优先使用 AstrBot 配置
+        merged_config = self._get_merged_config()
+
+        self.enable_intro = merged_config.get("enable_ai_intro", False)
+        self.enable_summary = merged_config.get("enable_ai_summary", False)
+        self.api_key = merged_config.get("ai_api_key", "")
+        self.model = merged_config.get("ai_model", "gpt-3.5-turbo")
+        self.base_url = merged_config.get("ai_base_url", "")
+        self.fixed_fallback = merged_config.get("fixed_fallback", True)
 
         # 检查依赖
         if not REQUESTS_AVAILABLE:
@@ -72,6 +74,51 @@ class AIGenerator:
                 logger.warning("AI功能已启用但未配置API Key，将使用固定模板")
             if not self.base_url:
                 logger.warning("AI功能已启用但未配置base_url，将使用固定模板")
+
+    def _get_merged_config(self) -> dict:
+        """合并配置：AstrBot配置 > 文件配置 > 默认值"""
+        merged = {
+            "enable_ai_intro": False,
+            "enable_ai_summary": False,
+            "ai_api_key": "",
+            "ai_model": "gpt-3.5-turbo",
+            "ai_base_url": "",
+            "fixed_fallback": True,
+        }
+
+        # 从文件配置中读取
+        if self.config:
+            merged.update(self.config)
+
+        # 从 AstrBot 配置中读取（优先级最高）
+        if self.config_manager:
+            try:
+                # 尝试读取 AstrBot 配置
+                astrbot_config = {}
+
+                # 读取各个配置项
+                if hasattr(self.config_manager, 'get'):
+                    ai_enabled = self.config_manager.get("world_event_ai_enabled")
+                    if ai_enabled is not None:
+                        merged["enable_ai_intro"] = bool(ai_enabled)
+                        merged["enable_ai_summary"] = bool(ai_enabled)
+
+                    ai_key = self.config_manager.get("world_event_ai_api_key")
+                    if ai_key:
+                        merged["ai_api_key"] = str(ai_key)
+
+                    ai_model = self.config_manager.get("world_event_ai_model")
+                    if ai_model:
+                        merged["ai_model"] = str(ai_model)
+
+                    ai_url = self.config_manager.get("world_event_ai_base_url")
+                    if ai_url:
+                        merged["ai_base_url"] = str(ai_url)
+
+            except Exception as e:
+                logger.warning(f"从 AstrBot 配置读取 AI 设置失败: {e}")
+
+        return merged
 
     def generate_event_intro(self, event_name: str, tier: str, participant_count: int,
                            recommended_level: str) -> str:
