@@ -1,16 +1,28 @@
 # handlers/alchemy_handlers.py
-"""炼丹系统指令处理器（批次2：丹药星级 / 配方详情 / 稀有配方学习状态）"""
+"""炼丹系统指令处理器（批次2：丹药星级 / 配方详情 / 稀有配方学习状态；批次3：炼丹师称号）"""
 
 from astrbot.api.event import AstrMessageEvent
 from ..managers.alchemy_manager import AlchemyManager
 from ..data.data_manager import DataBase
+from ..models import Player
 from ..models_extended import UserStatus
+from .utils import player_required
 
 
 class AlchemyHandlers:
     def __init__(self, db: DataBase, alchemy_mgr: AlchemyManager):
         self.db = db
         self.alchemy_mgr = alchemy_mgr
+
+    @player_required
+    async def handle_become_alchemist(self, player: Player, event: AstrMessageEvent):
+        """成为炼丹师（批次3）
+
+        条件：金丹期 + 成功炼制 10 次 + 10000 灵石，
+        成功后获得「炼丹师」称号（+15% 成功率）并自动解锁还魂丹等稀有配方。
+        """
+        msg = await self.alchemy_mgr.grant_alchemist_title(player)
+        yield event.plain_result(msg)
 
     async def handle_recipes(self, event: AstrMessageEvent):
         """丹药配方（含星级、学习状态与当前成功率）"""

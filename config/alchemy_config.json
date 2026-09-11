@@ -12,6 +12,15 @@
     "max_success_rate": 0.95,
     "max_shop_pill_star": 2,
     "waste_pill_name": "废丹",
-    "comment": "炼丹系统（批次2）核心参数：境界成功率加成 / 炼丹师称号加成 / 失败返还材料比例 / 废丹概率 / 商店最高可售丹药星级。配方与丹药星级见 config/alchemy_recipes.json"
+    "alchemist_level_required": 13,
+    "alchemist_success_required": 10,
+    "alchemist_cost": 10000,
+    "alchemist_rare_recipes": [101],
+    "commission_enabled": true,
+    "commission_max_quantity": 99,
+    "commission_max_fee": 1000000,
+    "commission_max_pending": 5,
+    "commission_max_active": 3,
+    "comment": "炼丹系统核心参数：境界/炼丹师成功率加成、失败返还比例、废丹概率、商店最高可售丹药星级（批次2）；炼丹师称号条件与委托炼丹参数（批次3）。配方与丹药星级见 config/alchemy_recipes.json"
   }
 }

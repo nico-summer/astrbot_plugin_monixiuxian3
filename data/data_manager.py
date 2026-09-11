@@ -304,6 +304,12 @@ class DataBase:
             # 炼丹系统（批次2）：已学习配方 / 称号
             ("DELETE FROM learned_recipes WHERE user_id = ?", (user_id,)),
             ("DELETE FROM player_titles WHERE user_id = ?", (user_id,)),
+            # 委托炼丹（批次3）：炼丹统计 / 委托记录
+            # 注：委托人注销时其托管材料随记录一并清理；炼丹师注销时进行中的委托
+            # 已托管的材料无法追回（材料在炼丹师身上），同样随记录清理。
+            ("DELETE FROM alchemy_stats WHERE user_id = ?", (user_id,)),
+            ("DELETE FROM alchemy_commissions WHERE client_id = ?", (user_id,)),
+            ("DELETE FROM alchemy_commissions WHERE alchemist_id = ?", (user_id,)),
         ]
 
         for sql, params in statements:
@@ -414,6 +420,298 @@ class DataBase:
             return [str(row[0]) for row in rows]
         except Exception as e:
             logger.warning(f"[称号系统] 查询称号列表失败: {e}")
+            return []
+
+    # ===== 委托炼丹（批次3）：炼丹统计 =====
+
+    async def record_alchemy_attempt(self, user_id: str, success: bool) -> bool:
+        """记录一次炼丹尝试（成功 / 失败都会累计）
+
+        炼丹师称号需要「成功炼制 N 次」，因此这里同时维护总次数与成功次数。
+        """
+        try:
+            success_value = 1 if success else 0
+            now = int(time.time())
+            await self.conn.execute(
+                """
+                INSERT INTO alchemy_stats (user_id, total_attempts, success_count, last_attempt_time)
+                VALUES (?, 1, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    total_attempts = total_attempts + 1,
+                    success_count = success_count + ?,
+                    last_attempt_time = ?
+                """,
+                (str(user_id), success_value, now, success_value, now),
+            )
+            await self.conn.commit()
+            return True
+        except Exception as e:
+            logger.warning(f"[炼丹系统] 记录炼丹统计失败: {e}")
+            return False
+
+    async def get_alchemy_success_count(self, user_id: str) -> int:
+        """获取成功炼制次数（炼丹师称号判定依据）"""
+        stats = await self.get_alchemy_stats(user_id)
+        return int(stats.get("success", 0) or 0)
+
+    async def get_alchemy_stats(self, user_id: str) -> dict:
+        """获取炼丹统计数据：{"total": int, "success": int, "last_time": int}"""
+        empty = {"total": 0, "success": 0, "last_time": 0}
+        try:
+            async with self.conn.execute(
+                """
+                SELECT total_attempts, success_count, last_attempt_time
+                FROM alchemy_stats WHERE user_id = ?
+                """,
+                (str(user_id),),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                return empty
+            return {
+                "total": int(row[0] or 0),
+                "success": int(row[1] or 0),
+                "last_time": int(row[2] or 0),
+            }
+        except Exception as e:
+            logger.warning(f"[炼丹系统] 查询炼丹统计失败: {e}")
+            return empty
+
+    # ===== 委托炼丹（批次3）：委托记录 =====
+
+    COMMISSION_FIELDS = (
+        "commission_id", "client_id", "alchemist_id", "recipe_id",
+        "quantity", "fee", "status", "materials_json",
+        "create_time", "accept_time", "complete_time",
+    )
+
+    @classmethod
+    def _row_to_commission(cls, row) -> dict:
+        """把数据库行转换为委托字典"""
+        data = dict(row)
+        try:
+            materials = json.loads(data.get("materials_json") or "{}")
+        except (TypeError, ValueError):
+            materials = {}
+        data["materials"] = materials if isinstance(materials, dict) else {}
+        return data
+
+    async def create_commission_record(
+        self,
+        client_id: str,
+        recipe_id: int,
+        quantity: int,
+        fee: int,
+        materials: dict,
+        alchemist_id: str = None,
+    ) -> Optional[int]:
+        """写入一条委托记录，返回委托编号（失败返回 None）
+
+        材料（含配方中的灵石消耗）与手续费在调用本方法前已从委托人身上扣除，
+        这里仅负责落库。
+        """
+        try:
+            materials_json = json.dumps(
+                {str(k): int(v) for k, v in (materials or {}).items()},
+                ensure_ascii=False,
+            )
+            cursor = await self.conn.execute(
+                """
+                INSERT INTO alchemy_commissions
+                    (client_id, alchemist_id, recipe_id, quantity, fee, status,
+                     materials_json, create_time)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+                """,
+                (
+                    str(client_id),
+                    str(alchemist_id) if alchemist_id else None,
+                    int(recipe_id),
+                    int(quantity),
+                    int(fee),
+                    materials_json,
+                    int(time.time()),
+                ),
+            )
+            await self.conn.commit()
+            return int(cursor.lastrowid)
+        except Exception as e:
+            logger.error(f"[委托炼丹] 创建委托记录失败: {e}")
+            return None
+
+    async def get_commission(self, commission_id: int) -> Optional[dict]:
+        """按编号获取委托详情"""
+        try:
+            async with self.conn.execute(
+                "SELECT * FROM alchemy_commissions WHERE commission_id = ?",
+                (int(commission_id),),
+            ) as cursor:
+                row = await cursor.fetchone()
+            return self._row_to_commission(row) if row else None
+        except Exception as e:
+            logger.warning(f"[委托炼丹] 查询委托失败: {e}")
+            return None
+
+    async def list_commissions(
+        self,
+        status: str = None,
+        alchemist_id: str = None,
+        client_id: str = None,
+        public_only: bool = False,
+        order_by_fee: bool = False,
+        limit: int = 20,
+    ) -> list:
+        """查询委托列表"""
+        sql = "SELECT * FROM alchemy_commissions WHERE 1 = 1"
+        params = []
+        if status:
+            sql += " AND status = ?"
+            params.append(str(status))
+        if alchemist_id:
+            sql += " AND alchemist_id = ?"
+            params.append(str(alchemist_id))
+        if client_id:
+            sql += " AND client_id = ?"
+            params.append(str(client_id))
+        if public_only:
+            sql += " AND alchemist_id IS NULL"
+        sql += " ORDER BY fee DESC, commission_id ASC" if order_by_fee else " ORDER BY commission_id DESC"
+        sql += " LIMIT ?"
+        params.append(max(1, int(limit)))
+
+        try:
+            async with self.conn.execute(sql, tuple(params)) as cursor:
+                rows = await cursor.fetchall()
+            return [self._row_to_commission(row) for row in rows]
+        except Exception as e:
+            logger.warning(f"[委托炼丹] 查询委托列表失败: {e}")
+            return []
+
+    async def count_commissions(
+        self,
+        client_id: str = None,
+        status: str = None,
+        alchemist_id: str = None,
+    ) -> int:
+        """统计委托数量"""
+        sql = "SELECT COUNT(*) FROM alchemy_commissions WHERE 1 = 1"
+        params = []
+        if client_id:
+            sql += " AND client_id = ?"
+            params.append(str(client_id))
+        if status:
+            sql += " AND status = ?"
+            params.append(str(status))
+        if alchemist_id:
+            sql += " AND alchemist_id = ?"
+            params.append(str(alchemist_id))
+        try:
+            async with self.conn.execute(sql, tuple(params)) as cursor:
+                row = await cursor.fetchone()
+            return int(row[0]) if row else 0
+        except Exception as e:
+            logger.warning(f"[委托炼丹] 统计委托失败: {e}")
+            return 0
+
+    async def claim_commission(self, commission_id: int, alchemist_id: str) -> bool:
+        """原子接单：仅当委托仍处于待接单状态时才能成功（防并发抢占）
+
+        公开委托（alchemist_id IS NULL）与「指定炼丹师」的委托都可以被接单，
+        后者只有被指定的炼丹师能接（此处用 (alchemist_id IS NULL OR alchemist_id = ?) 兜底）。
+        """
+        try:
+            cursor = await self.conn.execute(
+                """
+                UPDATE alchemy_commissions
+                SET alchemist_id = ?, accept_time = ?, status = 'in_progress'
+                WHERE commission_id = ? AND status = 'pending'
+                    AND (alchemist_id IS NULL OR alchemist_id = ?)
+                """,
+                (str(alchemist_id), int(time.time()), int(commission_id), str(alchemist_id)),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"[委托炼丹] 接单失败: {e}")
+            return False
+
+    async def release_commission(self, commission_id: int, alchemist_id: str = None) -> bool:
+        """把委托退回待接单状态（接单失败 / 炼丹师放弃时使用）
+
+        Args:
+            commission_id: 委托编号
+            alchemist_id: 退回后保留的「指定炼丹师」；为 None 时变为公开委托
+        """
+        try:
+            await self.conn.execute(
+                """
+                UPDATE alchemy_commissions
+                SET alchemist_id = ?, accept_time = NULL, status = 'pending'
+                WHERE commission_id = ? AND status = 'in_progress'
+                """,
+                (str(alchemist_id) if alchemist_id else None, int(commission_id)),
+            )
+            await self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"[委托炼丹] 回滚委托状态失败: {e}")
+            return False
+
+    async def complete_commission_record(self, commission_id: int) -> bool:
+        """标记委托为已完成"""
+        try:
+            cursor = await self.conn.execute(
+                """
+                UPDATE alchemy_commissions
+                SET status = 'completed', complete_time = ?
+                WHERE commission_id = ? AND status = 'in_progress'
+                """,
+                (int(time.time()), int(commission_id)),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"[委托炼丹] 完成委托失败: {e}")
+            return False
+
+    async def delete_commission(self, commission_id: int) -> bool:
+        """删除委托记录（取消 / 放弃时使用）"""
+        try:
+            await self.conn.execute(
+                "DELETE FROM alchemy_commissions WHERE commission_id = ?",
+                (int(commission_id),),
+            )
+            await self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"[委托炼丹] 删除委托失败: {e}")
+            return False
+
+    async def get_top_alchemists(self, limit: int = 5) -> list:
+        """炼丹师排行（按成功炼制次数）"""
+        try:
+            async with self.conn.execute(
+                """
+                SELECT s.user_id, p.user_name, s.success_count, s.total_attempts
+                FROM alchemy_stats s
+                LEFT JOIN players p ON p.user_id = s.user_id
+                WHERE s.success_count > 0
+                ORDER BY s.success_count DESC, s.total_attempts ASC
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            ) as cursor:
+                rows = await cursor.fetchall()
+            return [
+                {
+                    "user_id": str(row[0]),
+                    "user_name": str(row[1] or ""),
+                    "success_count": int(row[2] or 0),
+                    "total_attempts": int(row[3] or 0),
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.warning(f"[委托炼丹] 查询炼丹师排行失败: {e}")
             return []
 
     async def get_all_players(self):

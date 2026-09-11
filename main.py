@@ -15,14 +15,21 @@ from .handlers import (
     RiftHandlers, AdventureHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
     BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
-    MentorshipHandlers, TeamHandlers, RevivalHandler
+    MentorshipHandlers, TeamHandlers, RevivalHandler, CommissionHandlers
 )
 from .managers import (
     CombatManager, SectManager, BossManager, RiftManager,
     RankingManager, AdventureManager, AlchemyManager, ImpartManager,
     BankManager, BountyManager, ImpartPkManager,
     BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager,
-    MentorshipManager, TeamManager
+    MentorshipManager, TeamManager, CommissionManager
+)
+# 委托炼丹（批次3）：指令名统一定义在 handlers/commission_handlers.py，
+# 保证「注册指令名」与「参数解析用的指令名」始终一致
+from .handlers.commission_handlers import (
+    CMD_BECOME_ALCHEMIST, CMD_CREATE_COMMISSION, CMD_LIST_COMMISSIONS,
+    CMD_MY_COMMISSIONS, CMD_ACCEPT_COMMISSION, CMD_COMPLETE_COMMISSION,
+    CMD_CANCEL_COMMISSION, CMD_ABANDON_COMMISSION, CMD_ALCHEMIST_INFO,
 )
 
 
@@ -278,6 +285,10 @@ class XiuXianPlugin(Star):
         self.rank_mgr = RankingManager(self.db, self.combat_mgr, self.config_manager)
         self.adventure_mgr = AdventureManager(self.db, self.storage_ring_mgr, self.sect_mgr)
         self.alchemy_mgr = AlchemyManager(self.db, self.config_manager, self.storage_ring_mgr)
+        # 委托炼丹（批次3）：炼丹师职业 + 玩家间委托炼丹
+        self.commission_mgr = CommissionManager(
+            self.db, self.config_manager, self.storage_ring_mgr, self.alchemy_mgr
+        )
         self.impart_mgr = ImpartManager(self.db)
 
         # 初始化新功能处理器
@@ -288,6 +299,9 @@ class XiuXianPlugin(Star):
         self.rift_handlers = RiftHandlers(self.db, self.rift_mgr)
         self.adventure_handlers = AdventureHandlers(self.db, self.adventure_mgr)
         self.alchemy_handlers = AlchemyHandlers(self.db, self.alchemy_mgr)
+        self.commission_handlers = CommissionHandlers(
+            self.db, self.commission_mgr, self.alchemy_mgr
+        )
         self.impart_handlers = ImpartHandlers(self.db, self.impart_mgr)
         self.nickname_handler = NicknameHandler(self.db)  # Phase 1
         
@@ -1602,6 +1616,61 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_recipe_detail(self, event: AstrMessageEvent, recipe_id: int = 0):
         async for r in self.alchemy_handlers.handle_recipe_detail(event, recipe_id):
+            yield r
+
+    # ===== 委托炼丹 / 炼丹师职业指令（批次3） =====
+    @filter.command(CMD_BECOME_ALCHEMIST, "成为炼丹师（金丹期+成功炼制10次+10000灵石）")
+    @require_whitelist
+    async def handle_become_alchemist(self, event: AstrMessageEvent):
+        async for r in self.alchemy_handlers.handle_become_alchemist(event):
+            yield r
+
+    @filter.command(CMD_CREATE_COMMISSION, "发布委托炼丹（委托炼丹 <配方ID> [数量] [手续费] [@炼丹师]）")
+    @require_whitelist
+    async def handle_create_commission(self, event: AstrMessageEvent, args: str = ""):
+        async for r in self.commission_handlers.handle_create_commission(event, args):
+            yield r
+
+    @filter.command(CMD_LIST_COMMISSIONS, "查看委托炼丹列表")
+    @require_whitelist
+    async def handle_list_commissions(self, event: AstrMessageEvent):
+        async for r in self.commission_handlers.handle_list_commissions(event):
+            yield r
+
+    @filter.command(CMD_MY_COMMISSIONS, "查看我的委托炼丹")
+    @require_whitelist
+    async def handle_my_commissions(self, event: AstrMessageEvent):
+        async for r in self.commission_handlers.handle_my_commissions(event):
+            yield r
+
+    @filter.command(CMD_ACCEPT_COMMISSION, "接取委托炼丹（接取委托 <编号>）")
+    @require_whitelist
+    async def handle_accept_commission(self, event: AstrMessageEvent, commission_id: str = ""):
+        async for r in self.commission_handlers.handle_accept_commission(event, commission_id):
+            yield r
+
+    @filter.command(CMD_COMPLETE_COMMISSION, "完成委托炼丹（完成委托 <编号>）")
+    @require_whitelist
+    async def handle_complete_commission(self, event: AstrMessageEvent, commission_id: str = ""):
+        async for r in self.commission_handlers.handle_complete_commission(event, commission_id):
+            yield r
+
+    @filter.command(CMD_CANCEL_COMMISSION, "取消委托炼丹（取消委托 <编号>）")
+    @require_whitelist
+    async def handle_cancel_commission(self, event: AstrMessageEvent, commission_id: str = ""):
+        async for r in self.commission_handlers.handle_cancel_commission(event, commission_id):
+            yield r
+
+    @filter.command(CMD_ABANDON_COMMISSION, "放弃委托炼丹（放弃委托 <编号>）")
+    @require_whitelist
+    async def handle_abandon_commission(self, event: AstrMessageEvent, commission_id: str = ""):
+        async for r in self.commission_handlers.handle_abandon_commission(event, commission_id):
+            yield r
+
+    @filter.command(CMD_ALCHEMIST_INFO, "查看炼丹师信息与排行")
+    @require_whitelist
+    async def handle_alchemist_info(self, event: AstrMessageEvent):
+        async for r in self.commission_handlers.handle_alchemist_info(event):
             yield r
 
     # ===== 传承指令 =====

@@ -1,11 +1,13 @@
 # managers/alchemy_manager.py
-"""炼丹系统管理器（批次2：丹药星级 / 稀有配方学习 / 境界与称号加成）
+"""炼丹系统管理器（批次2：丹药星级 / 稀有配方学习 / 境界与称号加成；批次3：炼丹师职业）
 
 核心规则：
 - 丹药分 1-5 星，星级定义在 ``config/alchemy_recipes.json``；商店默认只售 1-2 星丹药
 - 5 星与标记 ``learnable`` 的配方需要先学习（可通过世界事件 / 宗门功法库等途径获得）
 - 成功率 = 基础成功率 + 境界加成（金丹+10% / 化神+20% / 合体+30%）+ 炼丹师称号加成（+15%），上限 95%
 - 炼制失败返还 50% 材料，小概率产出「废丹」
+- 炼丹师称号（批次3）：金丹期 + 成功炼制 10 次 + 1 万灵石，自动解锁还魂丹等稀有配方，
+  并可接取他人委托炼丹（见 ``managers/commission_manager.py``）
 """
 
 import random
@@ -37,6 +39,16 @@ class AlchemyManager:
         "max_success_rate": 0.95,
         "max_shop_pill_star": 2,
         "waste_pill_name": "废丹",
+        # 炼丹师称号（批次3）
+        "alchemist_level_required": 13,      # 金丹期初期
+        "alchemist_success_required": 10,    # 成功炼制次数
+        "alchemist_cost": 10000,             # 称号费用（灵石）
+        "alchemist_rare_recipes": [101],     # 自动解锁的稀有配方（还魂丹）
+        # 委托炼丹（批次3）
+        "commission_enabled": True,
+        "commission_max_quantity": 99,
+        "commission_max_fee": 1000000,
+        "commission_max_pending": 5,
     }
 
     # 材料获取途径配置（集中管理，避免到处硬编码）
@@ -418,6 +430,153 @@ class AlchemyManager:
             parts.append(f"炼丹师+{int(detail['alchemist_bonus'] * 100)}%")
         return f"{int(final_rate * 100)}%（{'，'.join(parts)}）"
 
+    # ===== 炼丹师称号（批次3） =====
+
+    def get_alchemist_config(self) -> Dict:
+        """炼丹师称号相关配置"""
+        return {
+            "level_required": int(self.get_setting("alchemist_level_required", 13) or 13),
+            "success_required": max(0, int(self.get_setting("alchemist_success_required", 10) or 0)),
+            "cost": max(0, int(self.get_setting("alchemist_cost", 10000) or 0)),
+            "rare_recipes": self.get_rare_recipes(),
+        }
+
+    def get_rare_recipes(self) -> List[int]:
+        """成为炼丹师后自动解锁的稀有配方ID列表"""
+        raw = self.get_setting("alchemist_rare_recipes", [101])
+        if isinstance(raw, (int, str)):
+            raw = [raw]
+        if not isinstance(raw, (list, tuple, set)):
+            return []
+
+        recipe_ids: List[int] = []
+        for value in raw:
+            try:
+                recipe_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if recipe_id in self.recipes and recipe_id not in recipe_ids:
+                recipe_ids.append(recipe_id)
+        return recipe_ids
+
+    async def check_alchemist_qualification(self, player: Player) -> Tuple[bool, str]:
+        """检查是否满足炼丹师称号条件（境界 / 成功次数 / 灵石）
+
+        Returns:
+            (是否满足, 未满足原因文本)
+        """
+        if not player:
+            return False, "  · 玩家数据不存在"
+
+        config = self.get_alchemist_config()
+        reasons: List[str] = []
+
+        # 条件1：境界达到金丹期
+        level_required = config["level_required"]
+        if int(player.level_index or 0) < level_required:
+            current = self.level_name(player.level_index, player)
+            reasons.append(
+                f"  · 境界需达到【{self.level_name(level_required, player)}】"
+                f"（当前：{current}）"
+            )
+
+        # 条件2：成功炼制次数
+        stats = await self.db.get_alchemy_stats(player.user_id)
+        success_count = int(stats.get("success", 0) or 0)
+        success_required = config["success_required"]
+        if success_count < success_required:
+            reasons.append(
+                f"  · 需成功炼制 {success_required} 次丹药"
+                f"（当前：{success_count}/{success_required}，累计尝试 {int(stats.get('total', 0) or 0)} 次）"
+            )
+
+        # 条件3：灵石
+        cost = config["cost"]
+        gold = int(player.gold or 0)
+        if gold < cost:
+            reasons.append(f"  · 需 {cost:,} 灵石（当前：{gold:,}）")
+
+        if reasons:
+            return False, "\n".join(reasons)
+        return True, ""
+
+    def get_alchemist_requirement_text(self, player: Player = None) -> str:
+        """炼丹师称号条件文本"""
+        config = self.get_alchemist_config()
+        level_text = self.level_name(config["level_required"], player)
+        return (
+            f"境界达到{level_text} + 成功炼制 {config['success_required']} 次丹药"
+            f" + {config['cost']:,} 灵石"
+        )
+
+    async def grant_alchemist_title(self, player: Player) -> str:
+        """授予炼丹师称号（扣除灵石 + 解锁稀有配方）"""
+        if not player:
+            return "❌ 玩家数据不存在"
+
+        config = self.get_alchemist_config()
+        bonus_percent = int(float(self.get_setting("alchemist_bonus", 0.15) or 0) * 100)
+
+        if await self.has_alchemist_title(player):
+            return (
+                "🎖️ 你已经是炼丹师了\n"
+                f"{'━' * 15}\n"
+                f"📈 炼丹成功率 +{bonus_percent}%\n"
+                "💼 可发送「委托列表」查看委托板，或发送「委托炼丹」发布委托"
+            )
+
+        qualified, reason = await self.check_alchemist_qualification(player)
+        if not qualified:
+            return (
+                "❌ 不满足炼丹师条件：\n"
+                f"{reason}\n"
+                f"{'━' * 15}\n"
+                f"💡 条件：{self.get_alchemist_requirement_text(player)}\n"
+                "💡 发送「丹药配方」查看可炼制丹药"
+            )
+
+        cost = config["cost"]
+
+        # 重新读取最新数据，避免使用过期对象（防止并发扣款 / 覆盖其他结算结果）
+        fresh = await self.db.get_player_by_id(player.user_id)
+        if not fresh:
+            return "❌ 玩家数据不存在，请稍后重试"
+
+        if int(fresh.gold or 0) < cost:
+            return f"❌ 灵石不足，需要 {cost:,} 灵石（当前：{int(fresh.gold or 0):,}）"
+
+        fresh.gold = int(fresh.gold or 0) - cost
+        await self.db.update_player(fresh)
+
+        titled = await self.db.grant_title(fresh.user_id, self.ALCHEMIST_TITLE)
+        if not titled:
+            # 授予失败则退还灵石，避免出现「扣了钱没称号」的情况
+            fresh.gold = int(fresh.gold or 0) + cost
+            await self.db.update_player(fresh)
+            return "❌ 授予炼丹师称号失败，已退还灵石，请稍后重试"
+
+        # 解锁稀有配方（还魂丹等）
+        unlocked: List[str] = []
+        for recipe_id in config["rare_recipes"]:
+            await self.db.learn_recipe(fresh.user_id, recipe_id)
+            recipe = self.recipes.get(int(recipe_id))
+            if recipe:
+                unlocked.append(f"{recipe['name']}（配方ID：{recipe_id}）")
+
+        lines = [
+            "✨ 恭喜成为炼丹师！",
+            f"{'━' * 15}",
+            "🎖️ 获得称号：炼丹师",
+            f"📈 炼丹成功率 +{bonus_percent}%",
+        ]
+        if unlocked:
+            lines.append(f"📜 解锁稀有配方：{'、'.join(unlocked)}")
+        lines.append("💼 开启委托炼丹功能")
+        lines.append(f"💰 消耗 {cost:,} 灵石")
+        lines.append(f"{'━' * 15}")
+        lines.append("💡 发送「委托列表」查看他人委托，发送「委托炼丹」发布委托")
+        return "\n".join(lines)
+
     # ===== 材料检查与消耗 =====
 
     def _material_counts(self, player: Player, materials: Dict[str, int]) -> Dict[str, int]:
@@ -690,6 +849,9 @@ class AlchemyManager:
         # 5. 计算成功率
         final_rate, detail = await self.compute_success_rate(player, recipe)
         is_success = random.random() < final_rate
+
+        # 5.1 记录炼丹统计（批次3：炼丹师称号需要「成功炼制 N 次」）
+        await self.db.record_alchemy_attempt(player.user_id, is_success)
 
         cost_lines = []
         if gold_cost > 0:

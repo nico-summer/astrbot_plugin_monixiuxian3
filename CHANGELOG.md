@@ -1,5 +1,68 @@
 # 版本更新日志
 
+## v3.6.0 (2026-09-11) - 炼丹师职业与委托炼丹（批次3）
+
+### ✨ 新功能
+
+#### 炼丹师称号
+
+- 新增指令 `成为炼丹师`：金丹期（境界 13）+ 成功炼制 10 次丹药 + 10000 灵石
+- 获得称号后：
+  - 炼丹成功率 **+15%**（与境界加成叠加，上限 95%）
+  - 10% 概率额外产出一枚丹药（沿用批次2 的 `alchemist_extra_pill_chance`）
+  - **自动解锁稀有配方**（`alchemist_rare_recipes`，默认还魂丹 101）
+- 新增炼丹统计 `alchemy_stats`：每次炼丹（成功 / 失败）都会累计
+  - `AlchemyManager.craft_pill` 结算时调用 `DataBase.record_alchemy_attempt`
+  - `AlchemyManager.check_alchemist_qualification` 依据成功次数判定资格
+- 新增指令 `炼丹师信息`：炼丹统计、称号状态、进行中的委托、炼丹师 Top5 排行
+
+#### 委托炼丹（玩家间炼丹服务交易）
+
+| 指令 | 说明 |
+|------|------|
+| 委托炼丹 <配方ID> [数量] [手续费] [@炼丹师] | 发布委托（材料 + 手续费托管锁定） |
+| 委托列表 | 查看公开委托板（按手续费从高到低） |
+| 我的委托 | 查看自己发布 / 接单的委托与状态 |
+| 接取委托 <编号> | 炼丹师接单（领取托管材料） |
+| 完成委托 <编号> | 炼丹师交付成品并领取手续费 |
+| 取消委托 <编号> | 委托人撤回未接单的委托（全额返还） |
+| 放弃委托 <编号> | 炼丹师放弃已接单的委托（退回委托人） |
+
+- **托管机制**：发布时材料（含配方中的灵石消耗）与手续费从委托人身上扣除并锁定，
+  完成前不落入任何一方；取消 / 放弃时原样返还
+- **接单转交材料**：接单前校验炼丹师资格、境界、稀有配方学习状态、储物戒剩余格数
+- **交付成品**：从炼丹师丹药背包扣除成品交付委托人，同时支付托管手续费
+- **指定炼丹师**：`@某人` 后仅该炼丹师可接单；未指定则进入公开委托板
+- **防并发**：`claim_commission` 采用条件 UPDATE，避免两位炼丹师抢同一单
+- **上限保护**：未接单委托 `commission_max_pending`(5) / 进行中委托 `commission_max_active`(3)
+  / 单笔数量 `commission_max_quantity`(99) / 手续费上限 `commission_max_fee`(1000000)
+- **储物戒空间保护**：退回材料前先校验委托人剩余格数，空间不足时保持委托不变，避免材料丢失
+
+### 📦 数据库变更
+
+- 新增 v35 迁移（启动自检幂等补齐，`repair_commission_tables`）：
+  - `alchemy_stats`：`user_id / total_attempts / success_count / last_attempt_time`
+  - `alchemy_commissions`：`commission_id / client_id / alchemist_id / recipe_id / quantity /
+    fee / status / materials_json / create_time / accept_time / complete_time`（含 3 个索引）
+- `delete_player_cascade` 同步清理炼丹统计与委托记录
+
+### 🧩 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `managers/commission_manager.py` | 委托炼丹管理器（发布 / 查询 / 接单 / 交付 / 取消 / 放弃） |
+| `handlers/commission_handlers.py` | 委托炼丹指令处理器（含参数解析与 @炼丹师 解析） |
+
+### 🔧 其他调整
+
+- `managers/alchemy_manager.py`：新增 `check_alchemist_qualification` / `grant_alchemist_title` /
+  `get_alchemist_config` / `get_rare_recipes` / `get_alchemist_requirement_text`
+- `data/data_manager.py`：新增炼丹统计与委托记录的读写方法
+- `handlers/utils.py`：元神状态放行 `委托列表` / `我的委托` / `炼丹师信息` / `取消委托`，
+  禁止 `成为炼丹师` / `委托炼丹` / `接取委托` / `完成委托` / `放弃委托`
+- `炼丹帮助` 新增「炼丹师职业」「委托炼丹」章节；`修仙帮助` 同步更新
+- 修复：`data/default_configs.py` 中 `DEFAULT_DEATH_CONFIG` 未定义导致的模块导入报错（批次1 遗留，会导致插件无法加载）
+
 ## v3.5.9 (2026-09-11) - 炼丹系统升级（丹药星级 / 稀有配方 / 还魂丹）
 
 ### ✨ 新功能

@@ -52,11 +52,29 @@ ALCHEMY_CONFIG = {
         "max_success_rate": 0.95,
         "max_shop_pill_star": 2,
         "waste_pill_name": "废丹",
+        # 炼丹师称号（批次3：委托炼丹）
+        "alchemist_level_required": 13,      # 成为炼丹师所需境界（金丹期初期）
+        "alchemist_success_required": 10,    # 成为炼丹师所需成功炼制次数
+        "alchemist_cost": 10000,             # 成为炼丹师所需灵石
+        "alchemist_rare_recipes": [101],     # 成为炼丹师自动解锁的稀有配方（还魂丹）
+        # 委托炼丹（批次3：炼丹师职业 + 委托炼丹）
+        "commission_enabled": True,          # 委托炼丹总开关
+        "commission_max_quantity": 99,       # 单笔委托最大炼制数量
+        "commission_max_fee": 1000000,       # 单笔委托手续费上限
+        "commission_max_pending": 5,         # 每人同时挂出的未接单委托上限
+        "commission_max_active": 3,          # 炼丹师同时进行中的委托上限
     }
 }
 
 # 死亡系统配置（批次1：死亡机制重构）
-# 默认值统一定义在 utils/death_config.py，避免多处维护导致不一致
+# 与 config/death_config.json、handlers/revival_handler.py 保持一致
+DEFAULT_DEATH_CONFIG = {
+    "soul_revival_hours": 24,
+    "soul_exp_loss_rate": 0.05,
+    "rebirth_exp_keep_rate": 0.7,
+    "soul_exp_decay_per_hour": 0.01,
+}
+
 DEATH_CONFIG = {
     "death_config": dict(DEFAULT_DEATH_CONFIG),
 }

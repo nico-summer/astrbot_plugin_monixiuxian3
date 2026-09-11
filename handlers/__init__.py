@@ -16,6 +16,7 @@ from .ranking_handlers import RankingHandlers
 from .rift_handlers import RiftHandlers
 from .adventure_handlers import AdventureHandlers
 from .alchemy_handlers import AlchemyHandlers
+from .commission_handlers import CommissionHandlers
 from .impart_handlers import ImpartHandlers
 from .nickname_handler import NicknameHandler
 from .bank_handlers import BankHandlers
@@ -46,6 +47,7 @@ __all__ = [
     "RiftHandlers",
     "AdventureHandlers",
     "AlchemyHandlers",
+    "CommissionHandlers",
     "ImpartHandlers",
     "NicknameHandler",
     "BankHandlers",

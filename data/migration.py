@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 34  # v34: 炼丹系统升级（丹药星级 / 配方学习 / 称号）
+LATEST_DB_VERSION = 35  # v35: 委托炼丹（炼丹师称号 / 炼丹统计 / 委托炼丹）
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -123,6 +123,78 @@ async def repair_alchemy_tables(conn: aiosqlite.Connection) -> bool:
         await conn.execute(sql)
         logger.info(f"已创建 {table} 表")
         created = True
+    return created
+
+
+# 委托炼丹（批次3）：炼丹统计表 + 委托炼丹表
+ALCHEMY_STATS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS alchemy_stats (
+        user_id TEXT PRIMARY KEY,
+        total_attempts INTEGER NOT NULL DEFAULT 0,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        last_attempt_time INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+    )
+"""
+
+
+# 委托炼丹表
+# - status：pending（待接单）/ in_progress（炼制中）/ completed（已完成）
+# - materials_json：委托人托管（锁定）的材料，含配方中的「灵石」消耗，接单时转交炼丹师
+# - fee：委托人托管的服务费（手续费），完成时支付给炼丹师
+ALCHEMY_COMMISSIONS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS alchemy_commissions (
+        commission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id TEXT NOT NULL,
+        alchemist_id TEXT,
+        recipe_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        fee INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        materials_json TEXT NOT NULL DEFAULT '{}',
+        create_time INTEGER NOT NULL DEFAULT 0,
+        accept_time INTEGER,
+        complete_time INTEGER,
+        FOREIGN KEY (client_id) REFERENCES players(user_id),
+        FOREIGN KEY (alchemist_id) REFERENCES players(user_id)
+    )
+"""
+
+
+ALCHEMY_COMMISSIONS_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_commissions_status ON alchemy_commissions(status)",
+    "CREATE INDEX IF NOT EXISTS idx_commissions_alchemist ON alchemy_commissions(alchemist_id)",
+    "CREATE INDEX IF NOT EXISTS idx_commissions_client ON alchemy_commissions(client_id)",
+)
+
+
+async def repair_commission_tables(conn: aiosqlite.Connection) -> bool:
+    """确保委托炼丹相关表存在（幂等）
+
+    - alchemy_stats：炼丹统计（成功炼制次数，炼丹师称号判定依据）
+    - alchemy_commissions：委托炼丹记录（公开委托板 / 指定炼丹师）
+
+    Returns:
+        True 表示至少创建过一张表，False 表示表已齐全
+    """
+    created = False
+    for table, sql in (
+        ("alchemy_stats", ALCHEMY_STATS_TABLE_SQL),
+        ("alchemy_commissions", ALCHEMY_COMMISSIONS_TABLE_SQL),
+    ):
+        async with conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ) as cursor:
+            exists = await cursor.fetchone()
+        if exists:
+            continue
+        await conn.execute(sql)
+        logger.info(f"已创建 {table} 表")
+        created = True
+
+    for sql in ALCHEMY_COMMISSIONS_INDEX_SQL:
+        await conn.execute(sql)
+
     return created
 
 
@@ -349,6 +421,9 @@ class MigrationManager:
             if await repair_alchemy_tables(self.conn):
                 await self.conn.commit()
                 logger.info("启动自检：炼丹系统相关表已创建")
+            if await repair_commission_tables(self.conn):
+                await self.conn.commit()
+                logger.info("启动自检：委托炼丹相关表已创建")
         except Exception as e:
             try:
                 await self.conn.rollback()
@@ -906,6 +981,12 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     # 炼丹系统（批次2）：已学习配方 / 玩家称号
     await conn.execute(LEARNED_RECIPES_TABLE_SQL)
     await conn.execute(PLAYER_TITLES_TABLE_SQL)
+
+    # 委托炼丹（批次3）：炼丹统计 / 委托炼丹记录
+    await conn.execute(ALCHEMY_STATS_TABLE_SQL)
+    await conn.execute(ALCHEMY_COMMISSIONS_TABLE_SQL)
+    for sql in ALCHEMY_COMMISSIONS_INDEX_SQL:
+        await conn.execute(sql)
 
     logger.info("数据库表已创建完成（v2 - 完整修仙系统）")
 
@@ -1688,3 +1769,21 @@ async def _migrate_to_v34(conn: aiosqlite.Connection, config_manager: ConfigMana
         logger.info("v34迁移完成：炼丹系统相关表已存在，无需变更")
 
     await conn.commit()
+
+
+@migration(35)
+async def _migrate_to_v35(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v35 - 委托炼丹（批次3）
+
+    新增两张表：
+    - alchemy_stats：炼丹统计（累计炼制 / 成功炼制次数）
+    - alchemy_commissions：委托炼丹记录（公开委托板 / 指定炼丹师）
+    """
+    logger.info("开始迁移到v35：委托炼丹（炼丹师称号 / 委托炼丹）")
+
+    created = await repair_commission_tables(conn)
+    await conn.commit()
+    if created:
+        logger.info("v35迁移完成：委托炼丹相关表已创建")
+    else:
+        logger.info("v35迁移完成：委托炼丹相关表已存在，无需变更")
