@@ -848,5 +848,113 @@
         "magic_damage": 280,
         "price": 6666666,
         "shop_weight": 20
+    },
+    "2025": {
+        "name": "嗜血草",
+        "type": "材料",
+        "rank": "珍品",
+        "description": "蕴含狂暴血气的灵草，是炼制狂暴丹的核心材料。",
+        "price": 3000,
+        "required_level_index": 7,
+        "shop_weight": 40
+    },
+    "2026": {
+        "name": "妖兽内丹",
+        "type": "材料",
+        "rank": "珍品",
+        "description": "高阶妖兽凝结的内丹，蕴含精纯妖力，可用于炼制狂暴类丹药。",
+        "price": 5000,
+        "required_level_index": 7,
+        "shop_weight": 30
+    },
+    "2027": {
+        "name": "金刚石",
+        "type": "材料",
+        "rank": "珍品",
+        "description": "坚硬无比的灵矿，是炼制护体金刚类丹药与防具的材料。",
+        "price": 8000,
+        "required_level_index": 7,
+        "shop_weight": 25
+    },
+    "2028": {
+        "name": "悟道草",
+        "type": "材料",
+        "rank": "天品",
+        "description": "生长于道韵之地的灵草，可助修士体悟大道，炼制悟道丹的主材。",
+        "price": 30000,
+        "required_level_index": 13,
+        "shop_weight": 12
+    },
+    "2029": {
+        "name": "菩提叶",
+        "type": "材料",
+        "rank": "地品",
+        "description": "菩提古树之叶，明心见性，可安定心神、辅助参悟。",
+        "price": 20000,
+        "required_level_index": 13,
+        "shop_weight": 15
+    },
+    "2030": {
+        "name": "护心草",
+        "type": "材料",
+        "rank": "天品",
+        "description": "可护持心脉的稀有灵草，是炼制护道丹的主材。",
+        "price": 30000,
+        "required_level_index": 13,
+        "shop_weight": 12
+    },
+    "2031": {
+        "name": "神木精华",
+        "type": "材料",
+        "rank": "地品",
+        "description": "万年神木中提炼的生机精华，可强化护体之效。",
+        "price": 25000,
+        "required_level_index": 13,
+        "shop_weight": 12
+    },
+    "2032": {
+        "name": "九转仙草",
+        "type": "材料",
+        "rank": "天品",
+        "description": "传说中经九次雷劫而不灭的仙草，还魂丹的核心主材（世界事件稀有掉落）。",
+        "price": 80000,
+        "required_level_index": 13,
+        "shop_weight": 8
+    },
+    "2033": {
+        "name": "太古龙骨",
+        "type": "材料",
+        "rank": "天品",
+        "description": "太古真龙遗骸之骨，蕴含不灭龙威，可重塑肉身（世界事件稀有掉落）。",
+        "price": 60000,
+        "required_level_index": 13,
+        "shop_weight": 8
+    },
+    "2034": {
+        "name": "灵髓精华",
+        "type": "材料",
+        "rank": "地品",
+        "description": "灵脉深处凝结的髓液精华，可滋养元神（世界事件稀有掉落）。",
+        "price": 20000,
+        "required_level_index": 13,
+        "shop_weight": 15
+    },
+    "2035": {
+        "name": "月华精粹",
+        "type": "材料",
+        "rank": "地品",
+        "description": "月华凝练而成的精粹，可稳定神魂（世界事件稀有掉落）。",
+        "price": 15000,
+        "required_level_index": 13,
+        "shop_weight": 15
+    },
+    "2036": {
+        "name": "废丹",
+        "type": "材料",
+        "rank": "凡品",
+        "description": "炼制失败产出的废丹，药力尽失，可卖给NPC回收少量灵石。",
+        "price": 50,
+        "required_level_index": 0,
+        "shop_weight": 0
     }
 }

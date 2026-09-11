@@ -20,6 +20,11 @@ CMD_CHECK_IN = "签到"
 # 死亡机制 / 复活系统指令（批次1）
 CMD_SOUL_STATE = "元神状态"
 CMD_NATURAL_REVIVAL = "自然复活"
+CMD_USE_REVIVAL_PILL = "使用还魂丹"
+# 丹药 / 炼丹相关指令（批次2）
+CMD_USE_PILL = "服用丹药"
+CMD_ALCHEMY_RECIPES = "丹药配方"
+CMD_RECIPE_DETAIL = "配方详情"
 
 # 忙碌状态下允许执行的命令白名单
 BUSY_STATE_ALLOWED_COMMANDS = [
@@ -42,6 +47,11 @@ BUSY_STATE_ALLOWED_COMMANDS = [
     "我的装备",
     "储物戒",
     "查看储物戒",
+    # 炼丹信息查看（只读操作，批次2）
+    "丹药配方",
+    "配方详情",
+    "材料查询",
+    "丹药信息",
     # 商店浏览（只读操作）
     "丹阁",
     "器阁",
@@ -90,6 +100,8 @@ SOUL_STATE_ALLOWED_COMMANDS = [
     "查看储物戒",
     "物品信息",
     "材料查询",
+    "丹药配方",
+    "配方详情",
     "丹药信息",
     "炼化图鉴",
     "丹阁",
@@ -234,6 +246,10 @@ def get_soul_state_block_message(message_text: str) -> str:
 
     # 所有「XX帮助」类指令始终可用
     if text.endswith("帮助"):
+        return ""
+
+    # 例外：元神状态下允许「服用丹药 还魂丹」直接复活
+    if _match_command(text, CMD_USE_PILL) and "还魂丹" in text:
         return ""
 
     for cmd in SOUL_STATE_ALLOWED_COMMANDS:

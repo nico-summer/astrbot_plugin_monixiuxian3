@@ -2,36 +2,146 @@
     {
         "id": 1,
         "name": "炼气丹",
+        "star": 1,
         "level_required": 0,
         "materials": {"灵草": 2, "灵石": 50},
-        "success_rate": 85
+        "success_rate": 85,
+        "desc": "增加500修为",
+        "effect_type": "exp_gain",
+        "exp_gain": 500
     },
     {
         "id": 2,
         "name": "聚灵丹",
+        "star": 1,
         "level_required": 0,
         "materials": {"灵草": 3, "灵石": 100},
-        "success_rate": 80
+        "success_rate": 80,
+        "desc": "增加1000修为",
+        "effect_type": "exp_gain",
+        "exp_gain": 1000
     },
     {
         "id": 3,
         "name": "凝气丹",
+        "star": 1,
         "level_required": 1,
         "materials": {"灵草": 4, "灵石": 150},
-        "success_rate": 75
+        "success_rate": 75,
+        "desc": "增加1500修为",
+        "effect_type": "exp_gain",
+        "exp_gain": 1500
     },
     {
         "id": 4,
         "name": "培元丹",
+        "star": 2,
         "level_required": 3,
         "materials": {"灵草": 5, "灵石": 250},
-        "success_rate": 70
+        "success_rate": 70,
+        "desc": "增加2500修为",
+        "effect_type": "exp_gain",
+        "exp_gain": 2500
     },
     {
         "id": 5,
         "name": "玄灵丹",
+        "star": 2,
         "level_required": 5,
         "materials": {"灵草": 8, "灵石": 500},
-        "success_rate": 60
+        "success_rate": 60,
+        "desc": "增加5000修为",
+        "effect_type": "exp_gain",
+        "exp_gain": 5000
+    },
+    {
+        "id": 101,
+        "name": "还魂丹",
+        "star": 5,
+        "level_required": 13,
+        "materials": {
+            "九转仙草": 1,
+            "太古龙骨": 1,
+            "灵髓精华": 3,
+            "月华精粹": 2
+        },
+        "success_rate": 30,
+        "desc": "元神状态立即复活，修为无损",
+        "effect_type": "revival",
+        "learnable": true
+    },
+    {
+        "id": 102,
+        "name": "狂暴丹",
+        "star": 3,
+        "level_required": 7,
+        "materials": {
+            "嗜血草": 3,
+            "妖兽内丹": 2,
+            "精铁": 1
+        },
+        "success_rate": 50,
+        "desc": "暴击率+50%，持续1小时",
+        "effect_type": "battle_buff",
+        "buff_duration": 3600,
+        "buff_effect": {
+            "crit_rate": 0.5
+        }
+    },
+    {
+        "id": 103,
+        "name": "金刚丹",
+        "star": 3,
+        "level_required": 7,
+        "materials": {
+            "金刚石": 2,
+            "精铁": 5,
+            "灵草": 3
+        },
+        "success_rate": 50,
+        "desc": "防御+100%，持续1小时",
+        "effect_type": "battle_buff",
+        "buff_duration": 3600,
+        "buff_effect": {
+            "defense_multiplier": 2.0
+        }
+    },
+    {
+        "id": 104,
+        "name": "悟道丹",
+        "star": 4,
+        "level_required": 13,
+        "materials": {
+            "悟道草": 3,
+            "菩提叶": 2,
+            "灵髓精华": 1
+        },
+        "success_rate": 40,
+        "desc": "功法经验+100%，持续6小时",
+        "effect_type": "cultivation_buff",
+        "buff_duration": 21600,
+        "buff_effect": {
+            "technique_exp_multiplier": 2.0
+        },
+        "learnable": true
+    },
+    {
+        "id": 105,
+        "name": "护道丹",
+        "star": 4,
+        "level_required": 13,
+        "materials": {
+            "护心草": 3,
+            "金刚石": 3,
+            "神木精华": 2
+        },
+        "success_rate": 45,
+        "desc": "PVP死亡不掉落装备，持续24小时",
+        "effect_type": "protection_buff",
+        "buff_duration": 86400,
+        "buff_effect": {
+            "no_drop_on_death": true
+        },
+        "learnable": true
     }
 ]

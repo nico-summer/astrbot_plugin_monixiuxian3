@@ -96,6 +96,10 @@ class PillManager:
             "physical_defense_multiplier": "物防倍率",
             "magic_defense_multiplier": "法防倍率",
             "breakthrough_bonus": "突破成功率",
+            # 批次2：高阶丹药附加效果
+            "crit_rate": "暴击率",
+            "defense_multiplier": "防御倍率",
+            "technique_exp_multiplier": "功法经验",
         }
         for key, label in multiplier_labels.items():
             if data.get(key):
@@ -128,6 +132,8 @@ class PillManager:
             lines.append(f"永久属性丹药上限提高 {data['base_attribute_limit_increase']:.0%}")
         if data.get("is_random"):
             lines.append("随机一项攻防倍率 +500%，其余攻防倍率 -90%")
+        if data.get("no_drop_on_death"):
+            lines.append("PVP死亡不掉落装备")
         duration = data.get("duration_minutes", 0)
         if duration:
             lines.append(f"持续 {duration} 分钟")
@@ -419,6 +425,10 @@ class PillManager:
                 skipped_lines.append(f"{pill_name}（配置不存在）")
                 continue
 
+            if pill_data.get("manual_only"):
+                skipped_lines.append(f"{pill_name}×{owned}（需手动使用）")
+                continue
+
             count, reason = self.get_consumption_limit(player, pill_name, pill_data)
             if count <= 0:
                 skipped_lines.append(f"{pill_name}×{owned}（{reason}）")
@@ -538,6 +548,11 @@ class PillManager:
         pill_data = self.get_pill_by_name(pill_name)
         if not pill_data:
             return False, f"丹药【{pill_name}】配置不存在！"
+
+        # 特殊丹药（如还魂丹）必须手动使用，避免一键服用误消耗
+        if pill_data.get("manual_only"):
+            hint = "使用还魂丹" if pill_name == "还魂丹" else "手动使用"
+            return False, f"【{pill_name}】需要手动使用（如：{hint}）"
 
         # 检查境界需求
         required_level = pill_data.get("required_level_index", 0)
@@ -809,7 +824,9 @@ class PillManager:
             "physical_defense_multiplier", "magic_defense_multiplier",
             "lifespan_cost_per_minute", "lifespan_regen_per_minute",
             "spiritual_qi_regen_per_minute", "blood_qi_regen_per_minute", "blood_qi_cost_per_minute",
-            "breakthrough_bonus"
+            "breakthrough_bonus",
+            # 批次2：高阶丹药附加效果（暴击 / 防御倍率 / 功法经验 / 死亡保护）
+            "crit_rate", "defense_multiplier", "technique_exp_multiplier", "no_drop_on_death",
         ]
         for key in effect_keys:
             if key in pill_data:

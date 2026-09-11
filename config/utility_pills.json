@@ -233,14 +233,17 @@
     {
         "id": "util_019",
         "name": "金刚丹",
-        "description": "永久增加物防+150",
-        "rank": "灵品",
-        "subtype": "permanent_attribute",
-        "required_level_index": 3,
-        "price": 700,
-        "effect_type": "permanent",
-        "physical_defense_gain": 150,
-        "shop_weight": 500
+        "description": "三星炼丹专属丹药：防御+100%，持续1小时",
+        "rank": "珍品",
+        "subtype": "battle_buff",
+        "star": 3,
+        "required_level_index": 7,
+        "price": 0,
+        "effect_type": "temporary",
+        "duration_minutes": 60,
+        "physical_defense_multiplier": 1.0,
+        "magic_defense_multiplier": 1.0,
+        "shop_weight": 0
     },
     {
         "id": "util_020",
@@ -401,16 +404,18 @@
     {
         "id": "util_033",
         "name": "狂暴丹",
-        "description": "临时增加物伤+200%，但物防-50%，持续30分钟",
-        "rank": "灵品",
-        "subtype": "combat_boost",
-        "required_level_index": 3,
-        "price": 400,
+        "description": "三星炼丹专属丹药：暴击率+50%、伤害+50%，持续1小时（暴击属性在战斗Buff系统接入后生效）",
+        "rank": "珍品",
+        "subtype": "battle_buff",
+        "star": 3,
+        "required_level_index": 7,
+        "price": 0,
         "effect_type": "temporary",
-        "duration_minutes": 30,
-        "physical_damage_multiplier": 2.0,
-        "physical_defense_multiplier": -0.5,
-        "shop_weight": 500
+        "duration_minutes": 60,
+        "crit_rate": 0.5,
+        "physical_damage_multiplier": 0.5,
+        "magic_damage_multiplier": 0.5,
+        "shop_weight": 0
     },
     {
         "id": "util_034",
@@ -1884,5 +1889,47 @@
         "duration_minutes": 720,
         "blood_qi_regen_per_minute": 50000,
         "shop_weight": 1
+    },
+    {
+        "id": "util_144",
+        "name": "还魂丹",
+        "description": "五星神丹：元神状态修士服用后立即完美复活，修为无损（需手动使用，炼丹师炼制）",
+        "rank": "仙品",
+        "subtype": "revival",
+        "star": 5,
+        "required_level_index": 0,
+        "price": 0,
+        "effect_type": "instant",
+        "manual_only": true,
+        "shop_weight": 0
+    },
+    {
+        "id": "util_145",
+        "name": "悟道丹",
+        "description": "四星丹药：功法经验+100%（修炼速度+100%），持续6小时",
+        "rank": "地品",
+        "subtype": "cultivation_buff",
+        "star": 4,
+        "required_level_index": 13,
+        "price": 0,
+        "effect_type": "temporary",
+        "duration_minutes": 360,
+        "cultivation_multiplier": 1.0,
+        "technique_exp_multiplier": 2.0,
+        "shop_weight": 0
+    },
+    {
+        "id": "util_146",
+        "name": "护道丹",
+        "description": "四星丹药：护道之力加身，PVP死亡不掉落装备，持续24小时",
+        "rank": "天品",
+        "subtype": "protection_buff",
+        "star": 4,
+        "required_level_index": 13,
+        "price": 0,
+        "effect_type": "temporary",
+        "duration_minutes": 1440,
+        "no_drop_on_death": true,
+        "shop_weight": 0
     }
 ]

@@ -22,6 +22,21 @@ class PillHandler:
         self.db = db
         self.config_manager = config_manager
         self.pill_manager = PillManager(db, config_manager)
+        # 复活系统处理器（批次2：还魂丹）；由 main.py 初始化后注入
+        self.revival_handler = None
+
+    def set_revival_handler(self, revival_handler):
+        """注入复活系统处理器（main.py 初始化复活系统后调用）"""
+        self.revival_handler = revival_handler
+
+    def _is_revival_pill(self, pill_name: str) -> bool:
+        """判断是否为「元神复活」类丹药（还魂丹）"""
+        if not pill_name:
+            return False
+        if pill_name == "还魂丹":
+            return True
+        pill_data = self.pill_manager.get_pill_by_name(pill_name)
+        return bool(pill_data) and pill_data.get("subtype") == "revival"
 
     def _format_required_level(self, level_index: int) -> str:
         """同时展示灵修/体修的需求境界名称"""
@@ -89,6 +104,15 @@ class PillHandler:
                 count = 1
 
         pill_name = pill_name.strip()
+
+        # 元神复活类丹药（还魂丹）：交给复活系统处理，避免被当作普通丹药消耗
+        if self._is_revival_pill(pill_name) and self.revival_handler is not None:
+            if count > 1:
+                yield event.plain_result("❌ 还魂丹一次只能服用1个！")
+                return
+            _ok, message = await self.revival_handler.use_revival_pill(player, pill_name)
+            yield event.plain_result(message)
+            return
 
         # 先更新临时效果（移除过期的）
         await self.pill_manager.update_temporary_effects(player)

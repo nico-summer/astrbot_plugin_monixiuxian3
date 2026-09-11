@@ -2,6 +2,7 @@
 
 import aiosqlite
 import json
+import time
 from dataclasses import fields
 from pathlib import Path
 from typing import Tuple, List, Optional
@@ -300,6 +301,9 @@ class DataBase:
             ("DELETE FROM impart_info WHERE user_id = ?", (user_id,)),
             ("DELETE FROM combat_cooldowns WHERE attacker_id = ? OR defender_id = ?", (user_id, user_id)),
             ("DELETE FROM pending_gifts WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id)),
+            # 炼丹系统（批次2）：已学习配方 / 称号
+            ("DELETE FROM learned_recipes WHERE user_id = ?", (user_id,)),
+            ("DELETE FROM player_titles WHERE user_id = ?", (user_id,)),
         ]
 
         for sql, params in statements:
@@ -307,6 +311,110 @@ class DataBase:
 
         await self.conn.execute("DELETE FROM players WHERE user_id = ?", (user_id,))
         await self.conn.commit()
+
+    # ===== 炼丹系统（批次2）：配方学习 / 玩家称号 =====
+
+    async def has_learned_recipe(self, user_id: str, recipe_id: int) -> bool:
+        """检查玩家是否已学习指定配方（表不存在时按「未学习」处理）"""
+        try:
+            async with self.conn.execute(
+                "SELECT 1 FROM learned_recipes WHERE user_id = ? AND recipe_id = ? LIMIT 1",
+                (str(user_id), int(recipe_id)),
+            ) as cursor:
+                return await cursor.fetchone() is not None
+        except Exception as e:
+            logger.warning(f"[炼丹系统] 查询已学习配方失败: {e}")
+            return False
+
+    async def learn_recipe(self, user_id: str, recipe_id: int) -> bool:
+        """学习配方（重复学习不会报错）"""
+        try:
+            await self.conn.execute(
+                "INSERT OR IGNORE INTO learned_recipes (user_id, recipe_id, learn_time) VALUES (?, ?, ?)",
+                (str(user_id), int(recipe_id), int(time.time())),
+            )
+            await self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"[炼丹系统] 学习配方失败: {e}")
+            return False
+
+    async def forget_recipe(self, user_id: str, recipe_id: int) -> bool:
+        """遗忘配方（主要用于测试 / 管理）"""
+        try:
+            await self.conn.execute(
+                "DELETE FROM learned_recipes WHERE user_id = ? AND recipe_id = ?",
+                (str(user_id), int(recipe_id)),
+            )
+            await self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"[炼丹系统] 遗忘配方失败: {e}")
+            return False
+
+    async def get_learned_recipes(self, user_id: str) -> List[int]:
+        """获取玩家已学习的配方ID列表"""
+        try:
+            async with self.conn.execute(
+                "SELECT recipe_id FROM learned_recipes WHERE user_id = ?",
+                (str(user_id),),
+            ) as cursor:
+                rows = await cursor.fetchall()
+            return [int(row[0]) for row in rows]
+        except Exception as e:
+            logger.warning(f"[炼丹系统] 查询已学习配方列表失败: {e}")
+            return []
+
+    async def has_title(self, user_id: str, title: str) -> bool:
+        """检查玩家是否拥有指定称号"""
+        try:
+            async with self.conn.execute(
+                "SELECT 1 FROM player_titles WHERE user_id = ? AND title = ? LIMIT 1",
+                (str(user_id), str(title)),
+            ) as cursor:
+                return await cursor.fetchone() is not None
+        except Exception as e:
+            logger.warning(f"[称号系统] 查询称号失败: {e}")
+            return False
+
+    async def grant_title(self, user_id: str, title: str) -> bool:
+        """授予玩家称号（重复授予不会报错）"""
+        try:
+            await self.conn.execute(
+                "INSERT OR IGNORE INTO player_titles (user_id, title, obtain_time) VALUES (?, ?, ?)",
+                (str(user_id), str(title), int(time.time())),
+            )
+            await self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"[称号系统] 授予称号失败: {e}")
+            return False
+
+    async def revoke_title(self, user_id: str, title: str) -> bool:
+        """收回称号（主要用于测试 / 管理）"""
+        try:
+            await self.conn.execute(
+                "DELETE FROM player_titles WHERE user_id = ? AND title = ?",
+                (str(user_id), str(title)),
+            )
+            await self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"[称号系统] 收回称号失败: {e}")
+            return False
+
+    async def get_titles(self, user_id: str) -> List[str]:
+        """获取玩家所有称号"""
+        try:
+            async with self.conn.execute(
+                "SELECT title FROM player_titles WHERE user_id = ? ORDER BY obtain_time",
+                (str(user_id),),
+            ) as cursor:
+                rows = await cursor.fetchall()
+            return [str(row[0]) for row in rows]
+        except Exception as e:
+            logger.warning(f"[称号系统] 查询称号列表失败: {e}")
+            return []
 
     async def get_all_players(self):
         """获取所有玩家"""

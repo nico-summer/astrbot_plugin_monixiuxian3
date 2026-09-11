@@ -152,6 +152,7 @@ CMD_ADVENTURE_INFO = "历练信息"
 CMD_ALCHEMY_RECIPES = "丹药配方"
 CMD_ALCHEMY_CRAFT = "炼丹"
 CMD_MATERIAL_QUERY = "材料查询"
+CMD_RECIPE_DETAIL = "配方详情"
 
 # 传承系统指令
 CMD_IMPART_INFO = "传承信息"
@@ -235,6 +236,8 @@ CMD_REBIRTH = "弃道重修"
 # 死亡机制 / 复活系统指令（批次1）
 CMD_SOUL_STATE = "元神状态"
 CMD_NATURAL_REVIVAL = "自然复活"
+# 死亡机制 / 复活系统指令（批次2：还魂丹）
+CMD_USE_REVIVAL_PILL = "使用还魂丹"
 class XiuXianPlugin(Star):
     """修仙插件 - 文字修仙游戏"""
 
@@ -323,6 +326,8 @@ class XiuXianPlugin(Star):
         )
         # 注入死亡配置，供 player_required 自动复活检查使用
         set_soul_state_config(self.death_config)
+        # 丹药处理器接入复活系统（批次2：服用/使用还魂丹完美复活）
+        self.pill_handler.set_revival_handler(self.revival_handler)
 
         self.boss_task = None # Boss生成任务
         self.loan_check_task = None # 贷款逾期检查任务
@@ -960,6 +965,20 @@ class XiuXianPlugin(Star):
             return
         yield event.plain_result(await self.revival_handler.natural_revival(player))
 
+    @filter.command(CMD_USE_REVIVAL_PILL, "使用还魂丹完美复活（元神状态专属）")
+    @require_whitelist
+    async def handle_use_revival_pill(self, event: AstrMessageEvent):
+        """使用还魂丹复活（批次2：炼丹系统升级）
+
+        还魂丹为 5 星稀有丹药，可让元神状态玩家立即完美复活且修为无损。
+        """
+        player = await self.db.get_player_by_id(str(event.get_sender_id()))
+        if not player:
+            yield event.plain_result("你还未踏入修仙之路，发送「我要修仙」开始修炼")
+            return
+        _ok, msg = await self.revival_handler.use_revival_pill(player)
+        yield event.plain_result(msg)
+
     @filter.command(CMD_START_CULTIVATION, "开始闭关修炼")
     @require_whitelist
     async def handle_start_cultivation(self, event: AstrMessageEvent):
@@ -1577,6 +1596,12 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_material_query(self, event: AstrMessageEvent, material_name: str = ""):
         async for r in self.alchemy_handlers.handle_material_query(event, material_name):
+            yield r
+
+    @filter.command(CMD_RECIPE_DETAIL, "查看配方详情（含星级与学习状态）")
+    @require_whitelist
+    async def handle_recipe_detail(self, event: AstrMessageEvent, recipe_id: int = 0):
+        async for r in self.alchemy_handlers.handle_recipe_detail(event, recipe_id):
             yield r
 
     # ===== 传承指令 =====

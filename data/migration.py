@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 33  # v33: 死亡机制重构（元神状态 / 劫后重生）
+LATEST_DB_VERSION = 34  # v34: 炼丹系统升级（丹药星级 / 配方学习 / 称号）
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -75,6 +75,55 @@ async def repair_soul_state_columns(conn: aiosqlite.Connection) -> bool:
         logger.info(f"已补充 players.{column} 字段")
         repaired = True
     return repaired
+
+
+# 炼丹系统（批次2）：已学习配方表 + 玩家称号表
+LEARNED_RECIPES_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS learned_recipes (
+        user_id TEXT NOT NULL,
+        recipe_id INTEGER NOT NULL,
+        learn_time INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, recipe_id),
+        FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+    )
+"""
+
+
+PLAYER_TITLES_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS player_titles (
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        obtain_time INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, title),
+        FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+    )
+"""
+
+
+async def repair_alchemy_tables(conn: aiosqlite.Connection) -> bool:
+    """确保炼丹系统相关表存在（幂等）
+
+    - learned_recipes：玩家已学习的稀有丹方（如还魂丹），5 星 / learnable 配方必须学习后才能炼制
+    - player_titles：玩家称号（如「炼丹师」），批次3 委托炼丹系统会使用
+
+    Returns:
+        True 表示至少创建过一张表，False 表示表已齐全
+    """
+    created = False
+    for table, sql in (
+        ("learned_recipes", LEARNED_RECIPES_TABLE_SQL),
+        ("player_titles", PLAYER_TITLES_TABLE_SQL),
+    ):
+        async with conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ) as cursor:
+            exists = await cursor.fetchone()
+        if exists:
+            continue
+        await conn.execute(sql)
+        logger.info(f"已创建 {table} 表")
+        created = True
+    return created
 
 
 async def repair_shop_refresh_usage_table(conn: aiosqlite.Connection) -> bool:
@@ -297,6 +346,9 @@ class MigrationManager:
             if await repair_soul_state_columns(self.conn):
                 await self.conn.commit()
                 logger.info("启动自检：players 元神状态字段已补齐")
+            if await repair_alchemy_tables(self.conn):
+                await self.conn.commit()
+                logger.info("启动自检：炼丹系统相关表已创建")
         except Exception as e:
             try:
                 await self.conn.rollback()
@@ -850,6 +902,10 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     # 创建宗门每日任务表（(user_id, task_date) 复合主键，每个玩家每天一行）
     await conn.execute(SECT_DAILY_TASKS_TABLE_SQL)
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_daily_tasks_date ON sect_daily_tasks(task_date)")
+
+    # 炼丹系统（批次2）：已学习配方 / 玩家称号
+    await conn.execute(LEARNED_RECIPES_TABLE_SQL)
+    await conn.execute(PLAYER_TITLES_TABLE_SQL)
 
     logger.info("数据库表已创建完成（v2 - 完整修仙系统）")
 
@@ -1611,5 +1667,24 @@ async def _migrate_to_v33(conn: aiosqlite.Connection, config_manager: ConfigMana
         logger.info("v33迁移完成：players 元神状态字段已补齐")
     else:
         logger.info("v33迁移完成：players 元神状态字段已存在，无需变更")
+
+    await conn.commit()
+
+
+@migration(34)
+async def _migrate_to_v34(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v34 - 炼丹系统升级（批次2）
+
+    新增两张表：
+    - learned_recipes：已学习丹方（还魂丹等高阶配方需学习后才能炼制）
+    - player_titles：玩家称号（炼丹师等）
+    """
+    logger.info("开始迁移到v34：炼丹系统升级（配方学习 / 称号）")
+
+    created = await repair_alchemy_tables(conn)
+    if created:
+        logger.info("v34迁移完成：炼丹系统相关表已创建")
+    else:
+        logger.info("v34迁移完成：炼丹系统相关表已存在，无需变更")
 
     await conn.commit()

@@ -65,6 +65,46 @@ class ShopManager:
             value = None
         return default if value is None else value
 
+    # ===== 丹药星级限制（批次2：商店只售 1-2 星丹药） =====
+    # 商店条目中代表丹药的 type 取值
+    PILL_ITEM_TYPES = ('pill', 'exp_pill', 'utility_pill')
+
+    def get_max_shop_pill_star(self) -> int:
+        """商店最高可售丹药星级（默认 2 星）"""
+        if hasattr(self.config_manager, "get_max_shop_pill_star"):
+            try:
+                return int(self.config_manager.get_max_shop_pill_star())
+            except Exception:
+                pass
+        try:
+            return int(self._cfg("SHOP_MAX_PILL_STAR", 2))
+        except (TypeError, ValueError):
+            return 2
+
+    def is_pill_item(self, item: Dict) -> bool:
+        """判断商店条目是否为丹药"""
+        if item.get('type') in self.PILL_ITEM_TYPES:
+            return True
+        data = item.get('data') or {}
+        return data.get('type') == '丹药'
+
+    def get_pill_star_of_item(self, item: Dict) -> int:
+        """获取商店条目的丹药星级（非丹药返回 0）"""
+        if not self.is_pill_item(item):
+            return 0
+        name = item.get('name') or (item.get('data') or {}).get('name') or ''
+        if hasattr(self.config_manager, "get_pill_star"):
+            try:
+                return int(self.config_manager.get_pill_star(name))
+            except Exception:
+                return 1
+        return 1
+
+    def is_high_star_pill_item(self, item: Dict) -> bool:
+        """3 星及以上丹药不上架（只能通过炼制 / 世界事件获得）"""
+        star = self.get_pill_star_of_item(item)
+        return star > self.get_max_shop_pill_star()
+
     # ===== 境界分层（公共货架） =====
     def get_item_tier(self, item: Dict) -> int:
         """物品的品质档位（0~8）"""
@@ -108,6 +148,9 @@ class ShopManager:
             except (TypeError, ValueError):
                 weight = 0.0
             if weight <= 0:
+                continue
+            # 批次2：3 星及以上丹药不上架（只能炼制 / 活动获得）
+            if self.is_high_star_pill_item(item):
                 continue
             pool.append(item)
         return pool
@@ -373,7 +416,8 @@ class ShopManager:
                     'data': pill
                 })
 
-        return all_items
+        # 批次2：3 星及以上丹药不上架（只能通过炼制 / 活动获得）
+        return [item for item in all_items if not self.is_high_star_pill_item(item)]
 
     def _weighted_random_choice(self, items: List[Dict], count: int) -> List[Dict]:
         """基于权重的随机选择（不重复）"""

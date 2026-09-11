@@ -420,6 +420,23 @@ class ShopHandler:
             "功法": "使用 /修仙装备 <功法名> 学习，最多同时装备3个",
             "丹药": "使用 /服用丹药 <名称> 使用（丹药不占用储物戒）",
         }
+        # 批次2：3 星以上丹药只能炼制获得，还魂丹需手动使用
+        if category == "丹药":
+            star = 1
+            try:
+                star = int(self.config_manager.get_pill_star(item_name))
+            except Exception:
+                star = 1
+            max_star = 2
+            try:
+                max_star = int(self.config_manager.get_max_shop_pill_star())
+            except Exception:
+                max_star = 2
+            if star > max_star:
+                hints["丹药"] = f"⚠️ {star}星丹药不上架商店，需自行炼制（丹药不占用储物戒）"
+            if item_name == "还魂丹":
+                hints["丹药"] = "💀 元神状态发送「使用还魂丹」完美复活（该丹药需手动使用）"
+
         lines.append(f"💡 {hints.get(category, '可在 /储物戒 中查看持有数量')}")
         return lines
 

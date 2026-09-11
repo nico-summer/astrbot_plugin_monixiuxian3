@@ -277,3 +277,79 @@ class RevivalHandler:
             "你的修为已完全流失，勉强复活\n"
             "⚠️ 请尽快重新修炼！"
         )
+
+    # ===== 还魂丹（批次2：炼丹系统升级） =====
+
+    def get_pill_count(self, player: Player, pill_name: str) -> int:
+        """获取丹药背包中的丹药数量"""
+        try:
+            inventory = player.get_pills_inventory()
+        except Exception:
+            return 0
+        try:
+            return int(inventory.get(pill_name, 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _remove_pill(self, player: Player, pill_name: str, count: int = 1) -> bool:
+        """从丹药背包移除丹药"""
+        inventory = player.get_pills_inventory()
+        owned = int(inventory.get(pill_name, 0) or 0)
+        if owned < count:
+            return False
+        if owned - count <= 0:
+            inventory.pop(pill_name, None)
+        else:
+            inventory[pill_name] = owned - count
+        player.set_pills_inventory(inventory)
+        return True
+
+    async def use_revival_pill(self, player: Player, pill_name: str = "还魂丹") -> Tuple[bool, str]:
+        """服用还魂丹复活（元神状态专属，完美复活且修为无损）
+
+        Args:
+            player: 玩家对象
+            pill_name: 丹药名称（默认还魂丹，方便后续扩展其它复活丹药）
+
+        Returns:
+            (是否复活成功, 消息)
+        """
+        if not player.is_soul_state:
+            return False, (
+                "🧘 你并未处于元神状态，无需使用还魂丹\n"
+                f"{SEP}\n"
+                "💡 还魂丹请在元神状态（金丹期以上突破死亡）下使用"
+            )
+
+        if self.get_pill_count(player, pill_name) <= 0:
+            return False, (
+                f"⚠️ 你的丹药背包中没有【{pill_name}】！\n"
+                f"{SEP}\n"
+                f"💡 {pill_name}获取途径：\n"
+                "  1. 自行炼制（5星稀有配方，需先学习丹方）\n"
+                "  2. 委托炼丹师炼制（批次3开放）\n"
+                "  3. 参与世界事件获得（批次4开放）"
+            )
+
+        # 消耗还魂丹后再复活，避免复活失败导致丹药异常
+        if not self._remove_pill(player, pill_name, 1):
+            return False, f"⚠️ 服用【{pill_name}】失败，请稍后重试"
+
+        ok, msg = await self.revive_by_pill(player)
+        if not ok:
+            # 复活失败（例如状态已被其它逻辑解除）则退还丹药
+            inventory = player.get_pills_inventory()
+            inventory[pill_name] = int(inventory.get(pill_name, 0) or 0) + 1
+            player.set_pills_inventory(inventory)
+            await self.db.update_player(player)
+            return False, msg
+
+        return True, (
+            f"✨ 【{pill_name}】药力涌现！\n"
+            f"{SEP}\n"
+            f"🌟 元神归位，肉身重塑\n"
+            f"💫 {player.user_name or player.user_id} 完美复活\n"
+            "📊 修为无损！\n"
+            f"{SEP}\n"
+            f"💫 当前修为：{player.experience}"
+        )

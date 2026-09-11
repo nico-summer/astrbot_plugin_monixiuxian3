@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from astrbot.api import logger
 from .data.default_configs import SECT_CONFIG, BOSS_CONFIG, RIFT_CONFIG, ALCHEMY_CONFIG, DEATH_CONFIG
@@ -159,6 +159,99 @@ class ConfigManager:
             return result
 
         return default
+
+    # ===== 炼丹系统（批次2） =====
+
+    # 丹药星级兜底默认值：未在配方/丹药配置中声明星级时视为 1 星
+    DEFAULT_PILL_STAR = 1
+    # 未被声明星级的丹药视为常规丹药，商店默认最高可售 2 星
+    DEFAULT_MAX_SHOP_PILL_STAR = 2
+    # 声明丹药星级时可用的键（依次在各配置源中查找）
+    PILL_STAR_SOURCES = ("pills_data", "exp_pills_data", "utility_pills_data", "items_data")
+
+    def get_alchemy_config(self) -> Dict[str, Any]:
+        """获取炼丹系统核心参数（兼容「嵌套 alchemy_config」与「扁平结构」两种写法）
+
+        优先级：嵌套格式 {"alchemy_config": {...}} > 扁平格式 > 内置默认值
+        """
+        default = dict(ALCHEMY_CONFIG.get("alchemy_config", {}))
+        config = self.alchemy_config if isinstance(self.alchemy_config, dict) else {}
+        if not config:
+            return default
+
+        nested = config.get("alchemy_config")
+        if isinstance(nested, dict) and nested:
+            result = dict(default)
+            result.update({k: v for k, v in nested.items() if v is not None})
+            return result
+
+        # 回退到扁平格式（直接包含配置项）
+        result = dict(default)
+        result.update({k: v for k, v in config.items() if k in default and v is not None})
+        return result
+
+    @staticmethod
+    def _normalize_star(value) -> Optional[int]:
+        """把星级配置值规整为 1-5 的整数，非法值返回 None"""
+        try:
+            star = int(value)
+        except (TypeError, ValueError):
+            return None
+        if star <= 0:
+            return None
+        return min(star, 5)
+
+    def get_pill_star(self, pill_name: str) -> int:
+        """获取丹药星级（1-5）
+
+        优先级：炼丹配方声明的星级 > 丹药配置内声明的 star 字段 > 兜底 1 星。
+        丹药星级用于「配方详情 / 丹药配方」展示，以及商店上架过滤（默认只售 1-2 星）。
+        """
+        if not pill_name:
+            return self.DEFAULT_PILL_STAR
+
+        recipe = (self.alchemy_recipes or {}).get(pill_name)
+        if isinstance(recipe, dict):
+            star = self._normalize_star(recipe.get("star"))
+            if star:
+                return star
+
+        for source in self.PILL_STAR_SOURCES:
+            data = (getattr(self, source, None) or {}).get(pill_name)
+            if isinstance(data, dict):
+                star = self._normalize_star(data.get("star"))
+                if star:
+                    return star
+
+        return self.DEFAULT_PILL_STAR
+
+    def is_high_star_pill(self, pill_name: str, max_star: int = None) -> bool:
+        """判断丹药星级是否超过商店可售上限（超过则只能通过炼制/活动获得）"""
+        limit = self.get_max_shop_pill_star() if max_star is None else max_star
+        return self.get_pill_star(pill_name) > limit
+
+    def get_max_shop_pill_star(self) -> int:
+        """商店最高可售丹药星级（默认 2 星，3 星以上丹药不上架）"""
+        settings = self.get_alchemy_config()
+        star = self._normalize_star(settings.get("max_shop_pill_star"))
+        return star if star else self.DEFAULT_MAX_SHOP_PILL_STAR
+
+    def get_pill_stars(self) -> Dict[str, int]:
+        """获取所有已声明星级的丹药名 -> 星级映射"""
+        stars: Dict[str, int] = {}
+        for name, recipe in (self.alchemy_recipes or {}).items():
+            if isinstance(recipe, dict):
+                star = self._normalize_star(recipe.get("star"))
+                if star:
+                    stars[name] = star
+        for source in self.PILL_STAR_SOURCES:
+            for name, data in (getattr(self, source, None) or {}).items():
+                if not isinstance(data, dict):
+                    continue
+                star = self._normalize_star(data.get("star"))
+                if star:
+                    stars.setdefault(name, star)
+        return stars
 
     def is_pill(self, item_name: str) -> bool:
         """检查物品是否为丹药类型（统一的丹药判断方法）"""

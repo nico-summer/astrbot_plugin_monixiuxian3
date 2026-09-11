@@ -1,74 +1,17 @@
 {
-  "recipes": {
-    "1": {
-      "name": "聚气丹",
-      "level_required": 0,
-      "materials": {
-        "灵草": 3,
-        "灵石": 100
-      },
-      "success_rate": 80,
-      "effect": {
-        "type": "exp",
-        "value": 1000
-      },
-      "desc": "增加1000修为"
+  "alchemy_config": {
+    "level_success_bonus": {
+      "13": 0.10,
+      "19": 0.20,
+      "25": 0.30
     },
-    "2": {
-      "name": "筑基丹",
-      "level_required": 2,
-      "materials": {
-        "灵草": 5,
-        "灵石": 500
-      },
-      "success_rate": 60,
-      "effect": {
-        "type": "exp",
-        "value": 5000
-      },
-      "desc": "增加5000修为"
-    },
-    "3": {
-      "name": "金丹",
-      "level_required": 5,
-      "materials": {
-        "灵草": 10,
-        "灵石": 2000
-      },
-      "success_rate": 40,
-      "effect": {
-        "type": "exp",
-        "value": 20000
-      },
-      "desc": "增加20000修为"
-    },
-    "4": {
-      "name": "回春丹",
-      "level_required": 1,
-      "materials": {
-        "灵草": 2,
-        "灵石": 200
-      },
-      "success_rate": 70,
-      "effect": {
-        "type": "hp_restore",
-        "value": 50
-      },
-      "desc": "恢复50%气血"
-    },
-    "5": {
-      "name": "聚灵丹",
-      "level_required": 1,
-      "materials": {
-        "灵草": 2,
-        "灵石": 200
-      },
-      "success_rate": 70,
-      "effect": {
-        "type": "mp_restore",
-        "value": 50
-      },
-      "desc": "恢复50%真元"
-    }
+    "alchemist_bonus": 0.15,
+    "alchemist_extra_pill_chance": 0.1,
+    "material_refund_rate": 0.5,
+    "waste_pill_chance": 0.05,
+    "max_success_rate": 0.95,
+    "max_shop_pill_star": 2,
+    "waste_pill_name": "废丹",
+    "comment": "炼丹系统（批次2）核心参数：境界成功率加成 / 炼丹师称号加成 / 失败返还材料比例 / 废丹概率 / 商店最高可售丹药星级。配方与丹药星级见 config/alchemy_recipes.json"
   }
 }
