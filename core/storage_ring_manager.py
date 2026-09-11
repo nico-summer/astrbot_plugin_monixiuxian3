@@ -83,7 +83,7 @@ class StorageRingManager:
             return False, reason
 
         if not external_transaction:
-            await self.db.conn.execute("BEGIN IMMEDIATE")
+            await self.db.begin_immediate()
         try:
             fresh_player = await self.db.get_player_by_id(player.user_id)
             if not fresh_player:
@@ -126,7 +126,7 @@ class StorageRingManager:
 
     async def retrieve_item(self, player: Player, item_name: str, count: int = 1) -> Tuple[bool, str]:
         """从储物戒取出物品（带事务保护）"""
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             player = await self.db.get_player_by_id(player.user_id)
             items = player.get_storage_ring_items()
@@ -158,7 +158,7 @@ class StorageRingManager:
 
     async def discard_item(self, player: Player, item_name: str, count: int = 1) -> Tuple[bool, str]:
         """丢弃储物戒中的物品（带事务保护）"""
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             player = await self.db.get_player_by_id(player.user_id)
             items = player.get_storage_ring_items()

@@ -1,5 +1,52 @@
 # 版本更新日志
 
+## v3.5.6 (2026-09-11) - 宗门每日任务跨天结算修复
+
+### 🐛 Bug修复
+
+#### 完成探索报 UNIQUE constraint failed: sect_daily_tasks.user_id
+
+- 现象：宗门成员执行「完成探索」（伴随的还有完成历练、收获灵田、宗门捐献）时抛出
+  `UNIQUE constraint failed: sect_daily_tasks.user_id`，指令直接失败，秘境奖励结算中断
+- 根因：`sect_daily_tasks` 建表时把 **`user_id` 设为单主键**，而每日任务逻辑是按
+  `(user_id, task_date)` 每天写入一行 —— 玩家当天首次能建记录，**次日**再建记录时就主键冲突。
+  （v3.5.5 之前该问题被 `name 'datetime' is not defined` 报错掩盖，修好导入后才暴露出来）
+- 修复：表结构改为 `PRIMARY KEY (user_id, task_date)`，同一玩家每天一行
+  - 新增 **v31 数据库迁移**：自动重建老库为复合主键，保留 `(user_id, task_date)`
+    与已有任务进度，幂等（结构正确时不做任何改动）
+  - `SectManager` 写入改为 `INSERT ... ON CONFLICT(user_id, task_date) DO NOTHING`；
+    若运行时检测到旧结构（缺列 / `ON CONFLICT` 不匹配），会**自动重建兜底**后重试
+  - 任务标记改为原子更新 `UPDATE ... WHERE user_id=? AND task_date=? AND <任务列>=0`，
+    以 `rowcount` 判断是否首次完成，避免并发或重复触发时重复发放贡献度
+  - 全新安装路径（`_create_all_tables_v2`）补齐 `sect_daily_tasks` 建表，
+    不再出现「no such table」问题
+- 影响路径：探索秘境 / 完成历练 / 收获灵田 / 宗门捐献（≥1000 灵石）的每日任务自动结算，
+  以及 `宗门任务` 面板
+
+#### 购买等指令报 cannot start a transaction within a transaction
+
+- 现象：`购买` 抛 `cannot start a transaction within a transaction`，而且**同一连接上会持续复现**
+  ——随后存/取灵石、悬赏、灵眼抢占、炼化材料等所有 `BEGIN IMMEDIATE` 型指令一起失效
+- 根因：上面那条 `UNIQUE constraint failed` 的 `INSERT` 在 SQLite 中**先隐式开启了事务**才失败，
+  旧代码没有回滚，事务就一直挂在共享连接上；此后任何 `BEGIN IMMEDIATE` 都因
+  「事务中不能再开事务」直接失败，形成连锁故障
+- 修复：
+  - 新增统一事务入口 `begin_immediate()`：检测到该错误时**自动回滚残留事务并重试**
+    （购买、银行存取款、悬赏、灵眼、师徒、炼化、储物戒整理等 18 处 `BEGIN IMMEDIATE` 全部改走该入口）
+  - 宗门每日任务的写入路径补充 `rollback` 保护，异常不再残留事务污染共享连接
+- 影响路径：`购买`、`存灵石`/`取灵石`、`悬赏`、`灵眼`、`师徒`、`一键炼化`、储物戒整理等
+
+### 📦 数据库变更
+
+- **需要迁移**：新增 v31，自动重建 `sect_daily_tasks` 为 `(user_id, task_date)` 复合主键
+  （插件启动时自动执行，无需手动操作；历史任务进度保留，不影响玩家数据）
+
+### 📋 指令变更
+
+- 无（未新增/调整指令）
+
+---
+
 ## v3.5.5 (2026-09-10) - 指令冲突与功法装备修复
 
 ### 🐛 Bug修复

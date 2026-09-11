@@ -237,7 +237,7 @@ class BountyManager:
         now = int(time.time())
         time_limit = cached.get("time_limit", template.get("time_limit", 3600))
 
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             active = await self.db.ext.get_active_bounty(player.user_id)
             if active:
@@ -322,7 +322,7 @@ class BountyManager:
         )
 
     async def complete_bounty(self, player: Player) -> Tuple[bool, str]:
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             active = await self.db.ext.get_active_bounty(player.user_id)
             if not active:
@@ -440,7 +440,7 @@ class BountyManager:
         if not activity_tag:
             return False, ""
 
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             active = await self.db.ext.get_active_bounty(player.user_id)
             if not active:

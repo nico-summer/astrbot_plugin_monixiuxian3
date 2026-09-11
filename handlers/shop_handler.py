@@ -166,7 +166,7 @@ class ShopHandler:
         item_type = target_item['type']
         result_lines = []
 
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             player = await self.db.get_player_by_id(event.get_sender_id())
             if player.gold < total_price:

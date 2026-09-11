@@ -69,7 +69,7 @@ class SpiritEyeManager:
     
     async def claim_spirit_eye(self, player: Player, eye_id: int) -> Tuple[bool, str]:
         """抢占灵眼（原子操作）"""
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             # 检查是否已有灵眼
             existing = await self.get_user_spirit_eye(player.user_id)

@@ -5,10 +5,30 @@
 
 import aiosqlite
 import json
+import sqlite3
 from typing import Dict, List, Optional
+from astrbot.api import logger
 from ..models_extended import (
     Sect, BuffInfo, Boss, Rift, ImpartInfo, UserCd
 )
+
+
+async def begin_immediate(conn: aiosqlite.Connection) -> None:
+    """开启 IMMEDIATE 写事务（带残留事务自愈）
+
+    上一次操作异常退出时，可能在共享连接上遗留未提交的隐式事务，
+    此时直接 BEGIN 会抛 "cannot start a transaction within a transaction"，
+    导致后续所有依赖事务的指令（购买、存取款、悬赏、炼化…）连锁失败。
+    检测到该错误时先回滚残留事务再重试。
+    """
+    try:
+        await conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError as e:
+        if "within a transaction" not in str(e):
+            raise
+        logger.warning("[database] 检测到残留的未提交事务，已回滚后重试 BEGIN IMMEDIATE")
+        await conn.rollback()
+        await conn.execute("BEGIN IMMEDIATE")
 
 
 class DatabaseExtended:
@@ -353,7 +373,7 @@ class DatabaseExtended:
     ):
         """原子扣除储物戒材料并发放炼化收益。"""
         try:
-            await self.conn.execute("BEGIN IMMEDIATE")
+            await begin_immediate(self.conn)
             async with self.conn.execute(
                 "SELECT storage_ring_items FROM players WHERE user_id = ?",
                 (user_id,)
@@ -411,7 +431,7 @@ class DatabaseExtended:
             results 为 [(材料名, 数量, 灵石, 修为), ...]
         """
         try:
-            await self.conn.execute("BEGIN IMMEDIATE")
+            await begin_immediate(self.conn)
             async with self.conn.execute(
                 "SELECT storage_ring_items FROM players WHERE user_id = ?",
                 (user_id,)

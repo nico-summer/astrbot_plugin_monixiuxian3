@@ -176,7 +176,7 @@ class MentorshipManager:
 
         # 创建师徒关系
         current_time = int(time.time())
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             await self.db.conn.execute(
                 """
@@ -298,7 +298,7 @@ class MentorshipManager:
         apprentice_gain = int(mentor_cost * self.INITIATION_GAIN_RATIO)
 
         # 执行灌顶
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             # 扣除师父修为
             await self.db.conn.execute(
@@ -337,7 +337,7 @@ class MentorshipManager:
         mentor_gold = int(gold_gain * self.MENTOR_REWARD_RATIO)
 
         if mentor_exp > 0 or mentor_gold > 0:
-            await self.db.conn.execute("BEGIN IMMEDIATE")
+            await self.db.begin_immediate()
             try:
                 # 给予师父奖励
                 await self.db.conn.execute(
@@ -368,7 +368,7 @@ class MentorshipManager:
         mentor_id = mentorship['mentor_id']
         mentor = await self.db.get_player_by_id(mentor_id)
 
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+        await self.db.begin_immediate()
         try:
             # 更新师徒状态
             await self.db.conn.execute(

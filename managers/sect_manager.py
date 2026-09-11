@@ -5,10 +5,13 @@
 """
 
 import random
+import sqlite3
 import time
 from datetime import datetime
 from typing import Tuple, List, Optional, Dict
+from astrbot.api import logger
 from ..data.data_manager import DataBase
+from ..data.migration import repair_sect_daily_tasks_table
 from ..models_extended import Sect, UserStatus
 from ..models import Player
 
@@ -807,12 +810,8 @@ class SectManager:
         if row:
             donated_stone, completed_adventure, harvested_farm, completed_rift = row
         else:
-            # 创建今日记录
-            await self.db.conn.execute(
-                "INSERT INTO sect_daily_tasks (user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift) VALUES (?, ?, 0, 0, 0, 0)",
-                (user_id, today)
-            )
-            await self.db.conn.commit()
+            # 创建今日记录（(user_id, task_date) 复合主键，每天一行）
+            await self._ensure_daily_task_row(user_id, today)
             donated_stone = completed_adventure = harvested_farm = completed_rift = 0
 
         # 定义任务列表
@@ -869,31 +868,24 @@ class SectManager:
         if not column_name:
             return False, 0
 
-        # 获取或创建今日任务记录
-        cursor = await self.db.conn.execute(
-            f"SELECT {column_name} FROM sect_daily_tasks WHERE user_id = ? AND task_date = ?",
-            (user_id, today)
-        )
-        row = await cursor.fetchone()
+        # 确保今日任务记录存在（(user_id, task_date) 复合主键，每天一行）
+        await self._ensure_daily_task_row(user_id, today)
 
-        if row:
-            # 检查是否已完成
-            if row[0] == 1:
-                return False, 0
-        else:
-            # 创建今日记录
-            await self.db.conn.execute(
-                "INSERT INTO sect_daily_tasks (user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift) VALUES (?, ?, 0, 0, 0, 0)",
+        # 原子标记完成：仅当该任务今日尚未完成时更新成功，避免重复发放贡献度
+        try:
+            cursor = await self.db.conn.execute(
+                f"UPDATE sect_daily_tasks SET {column_name} = 1 WHERE user_id = ? AND task_date = ? AND {column_name} = 0",
                 (user_id, today)
             )
+            updated = cursor.rowcount
             await self.db.conn.commit()
+        except Exception:
+            await self.db.conn.rollback()
+            raise
 
-        # 标记为已完成
-        await self.db.conn.execute(
-            f"UPDATE sect_daily_tasks SET {column_name} = 1 WHERE user_id = ? AND task_date = ?",
-            (user_id, today)
-        )
-        await self.db.conn.commit()
+        if not updated:
+            # 今日该任务已完成
+            return False, 0
 
         # 奖励贡献度
         task_rewards = {
@@ -909,3 +901,40 @@ class SectManager:
             await self.db.update_player(player)
 
         return True, contribution
+
+    async def _ensure_daily_task_row(self, user_id: str, today: str):
+        """
+        确保今日宗门任务记录存在
+
+        表结构为 (user_id, task_date) 复合主键，同一玩家每天一行；
+        若检测到历史遗留的 user_id 单主键结构，会自动重建修复，
+        避免出现 "UNIQUE constraint failed: sect_daily_tasks.user_id"。
+
+        Args:
+            user_id: 用户ID
+            today: 日期字符串（YYYY-MM-DD）
+        """
+        sql = (
+            "INSERT INTO sect_daily_tasks "
+            "(user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift) "
+            "VALUES (?, ?, 0, 0, 0, 0) "
+            "ON CONFLICT(user_id, task_date) DO NOTHING"
+        )
+        try:
+            await self.db.conn.execute(sql, (user_id, today))
+        except (sqlite3.IntegrityError, sqlite3.OperationalError) as e:
+            # 旧版单主键表结构：ON CONFLICT 无法匹配 / 主键冲突
+            # 先回滚失败语句留下的隐式事务，再重建表结构后重试
+            logger.warning(f"[宗门每日任务] 表结构异常，正在自动修复: {e}")
+            await self.db.conn.rollback()
+            try:
+                await repair_sect_daily_tasks_table(self.db.conn)
+                await self.db.conn.execute(sql, (user_id, today))
+            except Exception:
+                await self.db.conn.rollback()
+                raise
+        except Exception:
+            await self.db.conn.rollback()
+            raise
+
+        await self.db.conn.commit()

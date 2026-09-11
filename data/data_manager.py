@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Tuple, List, Optional
 from astrbot.api import logger
 from ..models import Player
-from .database_extended import DatabaseExtended
+from .database_extended import DatabaseExtended, begin_immediate
 
 # 获取 Player 模型的所有字段名（用于过滤数据库中的多余字段，作为迁移未完成时的兼容）
 PLAYER_FIELDS = {f.name for f in fields(Player)}
@@ -25,6 +25,10 @@ class DataBase:
         self.conn = await aiosqlite.connect(self.db_path)
         self.conn.row_factory = aiosqlite.Row
         self.ext = DatabaseExtended(self.conn)  # 初始化扩展操作
+
+    async def begin_immediate(self):
+        """开启 IMMEDIATE 写事务（若连接上残留未提交事务会自动回滚清理）"""
+        await begin_immediate(self.conn)
 
     async def close(self):
         """关闭数据库连接"""
@@ -355,7 +359,7 @@ class DataBase:
         """
         quantity = max(1, int(quantity))
         if not external_transaction:
-            await self.conn.execute("BEGIN IMMEDIATE")
+            await self.begin_immediate()
         try:
             async with self.conn.execute(
                 "SELECT last_refresh_time, current_items FROM shop WHERE shop_id = ?",
@@ -415,7 +419,7 @@ class DataBase:
     async def increment_shop_item_stock(self, shop_id: str, item_name: str, quantity: int = 1):
         """回滚库存（在购买失败时恢复库存），支持批量"""
         quantity = max(1, int(quantity))
-        await self.conn.execute("BEGIN IMMEDIATE")
+        await self.begin_immediate()
         try:
             async with self.conn.execute(
                 "SELECT last_refresh_time, current_items FROM shop WHERE shop_id = ?",

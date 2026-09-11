@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 30  # v30: 宗门福利升级系统完善
+LATEST_DB_VERSION = 31  # v31: 修复宗门每日任务表主键（user_id + task_date 复合主键）
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -15,6 +15,74 @@ def migration(version: int):
         MIGRATION_TASKS[version] = func
         return func
     return decorator
+
+# 宗门每日任务表：以 (user_id, task_date) 为复合主键，每个玩家每天一行
+SECT_DAILY_TASKS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS sect_daily_tasks (
+        user_id TEXT NOT NULL,
+        task_date TEXT NOT NULL,
+        donated_stone INTEGER NOT NULL DEFAULT 0,
+        completed_adventure INTEGER NOT NULL DEFAULT 0,
+        harvested_farm INTEGER NOT NULL DEFAULT 0,
+        completed_rift INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, task_date),
+        FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+    )
+"""
+
+
+async def repair_sect_daily_tasks_table(conn: aiosqlite.Connection) -> bool:
+    """确保 sect_daily_tasks 使用 (user_id, task_date) 复合主键（幂等）
+
+    历史结构曾使用 ``user_id`` 单主键，导致同一玩家次日写入新记录时报
+    ``UNIQUE constraint failed: sect_daily_tasks.user_id``，本函数负责重建修复。
+
+    Returns:
+        True 表示建表或重建过，False 表示结构本就正确
+    """
+    async with conn.execute("PRAGMA table_info(sect_daily_tasks)") as cursor:
+        columns = await cursor.fetchall()
+
+    if not columns:
+        # 表不存在（全新安装或历史版本未建表）
+        await conn.execute(SECT_DAILY_TASKS_TABLE_SQL)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_daily_tasks_date ON sect_daily_tasks(task_date)")
+        return True
+
+    column_names = [col[1] for col in columns]
+    # PRAGMA table_info 第 6 列（下标 5）为该列在主键中的序号，0 表示不属于主键
+    pk_columns = [col[1] for col in sorted(columns, key=lambda col: col[5]) if col[5]]
+
+    if pk_columns == ["user_id", "task_date"] and "donated_stone" in column_names:
+        return False
+
+    logger.info(f"重建 sect_daily_tasks 表结构（原主键: {pk_columns or '无'}）")
+
+    await conn.execute("DROP TABLE IF EXISTS sect_daily_tasks_old")
+    await conn.execute("ALTER TABLE sect_daily_tasks RENAME TO sect_daily_tasks_old")
+    await conn.execute(SECT_DAILY_TASKS_TABLE_SQL)
+
+    # 保留 (user_id, task_date) 维度；若旧表已含任务字段则一并保留进度
+    task_date_expr = "task_date" if "task_date" in column_names else "date('now')"
+    task_columns = ("donated_stone", "completed_adventure", "harvested_farm", "completed_rift")
+    if all(name in column_names for name in task_columns):
+        values_expr = ", ".join(f"COALESCE({name}, 0)" for name in task_columns)
+    else:
+        values_expr = "0, 0, 0, 0"
+
+    try:
+        await conn.execute(f"""
+            INSERT OR IGNORE INTO sect_daily_tasks (user_id, task_date, donated_stone, completed_adventure, harvested_farm, completed_rift)
+            SELECT user_id, COALESCE(NULLIF({task_date_expr}, ''), date('now')), {values_expr}
+            FROM sect_daily_tasks_old
+        """)
+    except Exception as e:
+        logger.warning(f"迁移 sect_daily_tasks 旧数据失败（已跳过）: {e}")
+
+    await conn.execute("DROP TABLE IF EXISTS sect_daily_tasks_old")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_daily_tasks_date ON sect_daily_tasks(task_date)")
+    logger.info("sect_daily_tasks 表结构重建完成")
+    return True
 
 @migration(23)
 async def _migrate_to_v23(conn: aiosqlite.Connection, config_manager: ConfigManager):
@@ -102,15 +170,8 @@ async def _migrate_to_v27(conn: aiosqlite.Connection, config_manager: ConfigMana
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_technique_borrow_user ON sect_technique_borrow(user_id)")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_technique_borrow_return ON sect_technique_borrow(return_time)")
 
-    # 创建宗门每日任务表
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS sect_daily_tasks (
-            user_id TEXT PRIMARY KEY,
-            task_date TEXT NOT NULL,
-            tasks_completed TEXT NOT NULL DEFAULT '{}',
-            FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
-        )
-    """)
+    # 创建宗门每日任务表（(user_id, task_date) 复合主键）
+    await conn.execute(SECT_DAILY_TASKS_TABLE_SQL)
 
     logger.info("v27迁移完成：宗门福利升级系统")
 
@@ -694,6 +755,10 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
             use_count INTEGER NOT NULL DEFAULT 0
         )
     """)
+
+    # 创建宗门每日任务表（(user_id, task_date) 复合主键，每个玩家每天一行）
+    await conn.execute(SECT_DAILY_TASKS_TABLE_SQL)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_sect_daily_tasks_date ON sect_daily_tasks(task_date)")
 
     logger.info("数据库表已创建完成（v2 - 完整修仙系统）")
 
@@ -1381,18 +1446,8 @@ async def _migrate_to_v30(conn: aiosqlite.Connection, config_manager: ConfigMana
         # 备份数据
         await conn.execute("ALTER TABLE sect_daily_tasks RENAME TO sect_daily_tasks_old")
 
-        # 创建新表
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS sect_daily_tasks (
-                user_id TEXT PRIMARY KEY,
-                task_date TEXT NOT NULL,
-                donated_stone INTEGER DEFAULT 0,
-                completed_adventure INTEGER DEFAULT 0,
-                harvested_farm INTEGER DEFAULT 0,
-                completed_rift INTEGER DEFAULT 0,
-                FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
-            )
-        """)
+        # 创建新表（(user_id, task_date) 复合主键）
+        await conn.execute(SECT_DAILY_TASKS_TABLE_SQL)
 
         # 迁移数据（保留user_id和task_date，任务重置）
         await conn.execute("""
@@ -1410,3 +1465,21 @@ async def _migrate_to_v30(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v30迁移完成：宗门福利升级系统完善")
+
+
+@migration(31)
+async def _migrate_to_v31(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v31 - 修复宗门每日任务表主键
+
+    修复 v27/v30 遗留的 user_id 单主键结构，避免同一玩家次日写任务记录时
+    触发 "UNIQUE constraint failed: sect_daily_tasks.user_id"。
+    """
+    logger.info("开始迁移到v31：修复宗门每日任务表主键")
+
+    rebuilt = await repair_sect_daily_tasks_table(conn)
+    if rebuilt:
+        logger.info("v31迁移完成：sect_daily_tasks 已按 (user_id, task_date) 复合主键重建")
+    else:
+        logger.info("v31迁移完成：sect_daily_tasks 结构已正确，无需重建")
+
+    await conn.commit()

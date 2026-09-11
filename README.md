@@ -4,7 +4,7 @@
   <img src=”logo.png” alt=”模拟修仙” width=”200”>
 </p>
 
-> **版本:** v3.5.5
+> **版本:** v3.5.6
 > **许可证:** AGPL-3.0  
 > **作者:** n1ko
 > **基于:** [nonebot_plugin_xiuxian_2](https://github.com/xiuxian-2/nonebot_plugin_xiuxian_2) (部分借鉴与重构)
@@ -476,7 +476,25 @@ astrbot_plugin_monixiuxian2/
 
 ## 📝 更新日志
 
-### 最新版本：v3.5.5 - 指令冲突与功法装备修复 🔧
+### 最新版本：v3.5.6 - 宗门每日任务跨天结算修复 🔧
+
+**🐛 问题修复：**
+- 修复宗门成员「完成探索」报 `UNIQUE constraint failed: sect_daily_tasks.user_id`：
+  `sect_daily_tasks` 建表时误把 `user_id` 设为单主键，而每日任务需要按
+  `(user_id, task_date)` 每天写入一行 —— 玩家当天能建记录，**次日**再建就主键冲突，
+  导致秘境探索 / 历练 / 收获灵田 / 宗门捐献的每日任务结算全部失败。
+  现改为 `(user_id, task_date)` 复合主键，并新增 **v31 数据库迁移**自动重建老库
+- 任务标记改为原子更新（`rowcount` 判定首次完成），避免重复触发时重复发放贡献度
+- 命中旧表结构时运行时会自动重建兜底（无需手动删库）
+- 顺带修复由此引发的连锁故障：`购买` 等指令报 `cannot start a transaction within a transaction`
+  （失败的写入语句残留事务未回滚，导致后续所有 `BEGIN IMMEDIATE` 指令持续失败）。
+  现统一走自愈事务入口 `begin_immediate()`：检测到残留事务自动回滚并重试
+
+**📦 数据库变更：**
+- 新增 v31 迁移：`sect_daily_tasks` 重建为 `(user_id, task_date)` 复合主键，
+  保留原有任务进度数据，插件启动时自动执行
+
+### 历史版本：v3.5.5 - 指令冲突与功法装备修复 🔧
 
 **🐛 问题修复：**
 - 修复 `赠予 @某人 物品 数量` 无法赠予（总是提示「请指定要赠予的物品名称」）：
@@ -523,6 +541,7 @@ astrbot_plugin_monixiuxian2/
 - 修复秘境/商店掉落的旧版丹药（如七品太乙丹、三品凝神增益丹）在丹药背包中无法服用的问题
 - 修复秘境掉落装备无法穿戴的问题：45 件秘境装备现可正常装备
 - 修复宗门成员完成秘境探索时报 `name 'datetime' is not defined`（宗门战每日任务结算缺少 datetime 导入）
+- 修复宗门每日任务跨天写入报 `UNIQUE constraint failed: sect_daily_tasks.user_id`（v3.5.6 已修复：改为 (user_id, task_date) 复合主键 + v31 迁移）
 - 修复宗门玩家 `我的信息` / `出关` 报 `'PlayerHandler' object has no attribute 'sect_mgr'`
 - 修复借用功法到期归还报 `'Player' object has no attribute 'get_techniques'`（改用 `get_techniques_list`）
 - 修复 `传承挑战` 报 `'CombatManager' object has no attribute 'calculate_combat_stats'`（按切磋战同一套公式重建战斗属性）
