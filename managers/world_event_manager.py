@@ -1183,3 +1183,208 @@ class WorldEventManager:
                 lines.append("⚔️ 战斗进行中，本次未参战")
 
         return "\n".join(lines)
+
+    # ==================== 管理员功能（批次5） ====================
+
+    def is_admin(self, user_id: str) -> bool:
+        """检查用户是否为管理员"""
+        admin_list = self._config().get("admin_users", [])
+        return str(user_id) in [str(uid) for uid in admin_list]
+
+    async def create_admin_event(
+        self,
+        admin_id: str,
+        tier: str,
+        group_id: str,
+        custom_name: str = None,
+        custom_death_rate: float = None,
+        reward_multiplier: float = 2.0,
+    ) -> Tuple[bool, str, Optional[int]]:
+        """管理员创建世界事件
+
+        Args:
+            admin_id: 管理员用户ID
+            tier: 难度（low/mid/high/epic）
+            group_id: 目标群号
+            custom_name: 自定义事件名称（可选）
+            custom_death_rate: 自定义死亡率（可选，0.0-1.0）
+            reward_multiplier: 奖励倍率（默认2.0）
+
+        Returns:
+            (是否成功, 消息, 事件ID)
+        """
+        if not self.is_admin(admin_id):
+            return False, "⚠️ 你没有管理员权限", None
+
+        allowed_groups = self._config().get("broadcast_groups", [])
+        if allowed_groups and str(group_id) not in [str(g) for g in allowed_groups]:
+            return False, f"❌ 群号 {group_id} 不在允许列表中", None
+
+        tier_map = {
+            "low": "low_tier",
+            "mid": "mid_tier",
+            "high": "high_tier",
+            "epic": "epic_tier",
+        }
+        tier_key = tier_map.get(tier)
+        if not tier_key:
+            return False, f"❌ 无效的难度：{tier}（可选：low/mid/high/epic）", None
+
+        template = self.get_random_template(tier_key)
+        if not template:
+            tier_name = {"low": "低阶", "mid": "中阶", "high": "高阶", "epic": "史诗"}.get(tier, tier)
+            return False, f"❌ 没有找到{tier_name}难度的事件模板", None
+
+        template = dict(template)
+        if custom_name:
+            template["name"] = str(custom_name)
+        if custom_death_rate is not None:
+            try:
+                rate = float(custom_death_rate)
+                if 0.0 <= rate <= 1.0:
+                    template["base_death_rate"] = rate
+            except (TypeError, ValueError):
+                pass
+
+        event_id = await self.create_event(
+            template=template,
+            group_id=str(group_id),
+            reward_multiplier=float(reward_multiplier),
+            admin_created=True,
+        )
+
+        if not event_id:
+            return False, "❌ 创建事件失败，请稍后重试", None
+
+        tier_name = template.get("tier", "未知")
+        lines = [
+            "✅ 世界事件创建成功！",
+            SEP,
+            f"📋 事件ID：{event_id}",
+            f"🌟 {template['name']}",
+            f"⚔️ 难度：{tier_name}",
+            f"💀 死亡率：{int(template['base_death_rate'] * 100)}%",
+            f"🎁 奖励倍率：{reward_multiplier}x",
+            f"📢 目标群：{group_id}",
+            SEP,
+            "事件已创建，将在报名期结束后自动开始",
+            "💡 发送「查看世界事件」查看所有活动事件",
+        ]
+        return True, "\n".join(lines), event_id
+
+    async def list_event_templates(self) -> str:
+        """列出所有事件模板（管理员）"""
+        templates = self._templates()
+        if not templates:
+            return "❌ 没有可用的事件模板"
+
+        tier_names = {
+            "low_tier": "低阶",
+            "mid_tier": "中阶",
+            "high_tier": "高阶",
+            "epic_tier": "史诗",
+        }
+
+        lines = ["📜 世界事件模板列表", SEP]
+        idx = 1
+        for tier_key in ["low_tier", "mid_tier", "high_tier", "epic_tier"]:
+            tier_list = templates.get(tier_key, [])
+            if not tier_list:
+                continue
+
+            tier_name = tier_names.get(tier_key, tier_key)
+            lines.append(f"\n【{tier_name}】")
+            for template in tier_list:
+                name = template.get("name", "未命名")
+                death_rate = int((template.get("base_death_rate", 0) or 0) * 100)
+                min_level = self._get_level_name(template.get("min_level", 0))
+                lines.append(f"{idx}. {name}（死亡率{death_rate}%，推荐{min_level}+）")
+                idx += 1
+
+        lines.append(f"\n{SEP}")
+        lines.append("💡 使用方法：创建世界事件 <难度> <群号> [奖励倍率]")
+        lines.append("💡 难度：低阶/中阶/高阶/史诗")
+        lines.append("💡 例如：创建世界事件 高阶 123456789 3.0")
+        return "\n".join(lines)
+
+    async def get_active_events(self) -> str:
+        """查看所有进行中的事件（管理员）"""
+        try:
+            events = await self.db.list_world_events(
+                status_filter=["signup", "in_progress"],
+                limit=20,
+            )
+        except Exception as e:
+            logger.error(f"[世界事件] 查询活动事件失败: {e}")
+            return "❌ 查询失败，请稍后重试"
+
+        if not events:
+            return f"📭 当前没有进行中的事件\n{SEP}\n💡 发送「世界事件模板」查看可创建的事件"
+
+        lines = ["📊 活动事件列表", SEP]
+        for event in events:
+            event_id = event.get("event_id")
+            group_id = event.get("group_id", "未知")
+            status = event.get("status", "unknown")
+            event_data = event.get("event_data", {})
+
+            if isinstance(event_data, str):
+                try:
+                    event_data = json.loads(event_data)
+                except Exception:
+                    event_data = {}
+
+            name = event_data.get("name", "未命名事件")
+            tier = event_data.get("tier", "未知")
+            status_text = {"signup": "报名中", "in_progress": "进行中"}.get(status, status)
+            admin_tag = "🎯 " if event_data.get("admin_created") else ""
+
+            lines.append(f"\n#{event_id} {admin_tag}{name}")
+            lines.append(f"  群号：{group_id}｜难度：{tier}｜状态：{status_text}")
+
+        lines.append(f"\n{SEP}")
+        lines.append("💡 发送「结束世界事件 <事件ID>」可强制结束事件")
+        return "\n".join(lines)
+
+    async def force_end_event(self, admin_id: str, event_id: int) -> Tuple[bool, str]:
+        """管理员强制结束事件"""
+        if not self.is_admin(admin_id):
+            return False, "⚠️ 你没有管理员权限"
+
+        try:
+            event_id = int(event_id)
+        except (TypeError, ValueError):
+            return False, "❌ 事件ID必须是数字"
+
+        event = await self.db.get_world_event(event_id)
+        if not event:
+            return False, f"❌ 事件 #{event_id} 不存在"
+
+        status = event.get("status")
+        if status not in ["signup", "in_progress"]:
+            status_text = {"completed": "已完成", "cancelled": "已取消"}.get(status, status)
+            return False, f"❌ 事件 #{event_id} 已{status_text}，无法强制结束"
+
+        try:
+            await self.db.cancel_world_event(event_id)
+        except Exception as e:
+            logger.error(f"[世界事件] 强制结束事件失败: {e}")
+            return False, f"❌ 结束事件失败：{e}"
+
+        event_data = event.get("event_data", {})
+        if isinstance(event_data, str):
+            try:
+                event_data = json.loads(event_data)
+            except Exception:
+                event_data = {}
+
+        name = event_data.get("name", "未命名事件")
+        return True, (
+            f"✅ 事件已强制结束\n"
+            f"{SEP}\n"
+            f"📋 事件ID：{event_id}\n"
+            f"🌟 {name}\n"
+            f"📢 群号：{event.get('group_id', '未知')}\n"
+            f"{SEP}\n"
+            "事件已取消，参与者无需结算"
+        )

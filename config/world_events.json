@@ -14,7 +14,34 @@
     },
     "admin_users": [],
     "broadcast_groups": [],
-    "comment": "世界事件（批次4）：auto_interval_minutes 为自动生成间隔（分钟，取区间随机值）；signup_duration_seconds 为报名时长；death_penalty_reward_rate 为阵亡者奖励保留比例；auto_tier_weights 为自动生成时各难度权重；broadcast_groups 为空时使用插件白名单群；admin_users 为可手动创建事件的管理员（批次5）。"
+    "ai_config": {
+      "enable_ai_intro": false,
+      "enable_ai_summary": false,
+      "ai_api_key": "",
+      "ai_model": "gpt-3.5-turbo",
+      "ai_base_url": "",
+      "fixed_fallback": true,
+      "comment": "AI文案生成（批次5，可选）：支持OpenAI格式的通用API，兼容OpenAI/DeepSeek/硅基流动/OpenRouter等。enable_ai_intro/enable_ai_summary 控制是否启用；ai_base_url 为API地址（如 https://api.deepseek.com 或 https://api.siliconflow.cn/v1）；ai_model 为模型名称（如 deepseek-chat, Qwen/Qwen2.5-7B-Instruct）；fixed_fallback=true 表示AI失败时使用固定模板。",
+      "examples": {
+        "openai": {
+          "ai_base_url": "https://api.openai.com/v1",
+          "ai_model": "gpt-3.5-turbo"
+        },
+        "deepseek": {
+          "ai_base_url": "https://api.deepseek.com",
+          "ai_model": "deepseek-chat"
+        },
+        "siliconflow": {
+          "ai_base_url": "https://api.siliconflow.cn/v1",
+          "ai_model": "Qwen/Qwen2.5-7B-Instruct"
+        },
+        "openrouter": {
+          "ai_base_url": "https://openrouter.ai/api/v1",
+          "ai_model": "openai/gpt-3.5-turbo"
+        }
+      }
+    },
+    "comment": "世界事件（批次4）：auto_interval_minutes 为自动生成间隔（分钟，取区间随机值）；signup_duration_seconds 为报名时长；death_penalty_reward_rate 为阵亡者奖励保留比例；auto_tier_weights 为自动生成时各难度权重；broadcast_groups 为空时使用插件白名单群；admin_users 为可手动创建事件的管理员（批次5）；ai_config 为AI文案生成配置（批次5，可选）。"
   },
   "event_templates": {
     "low_tier": [

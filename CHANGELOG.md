@@ -1,5 +1,79 @@
 # 版本更新日志
 
+## v3.8.0 (2026-09-11) - 管理员功能与AI集成（批次5）
+
+### 🛠️ 管理员指令（仅私聊bot）
+
+- **创建世界事件**：`创建世界事件 <难度> <群号> [奖励倍率]`
+  - 管理员手动创建并广播世界事件
+  - 难度支持：低阶/中阶/高阶/史诗
+  - 可自定义奖励倍率（默认2.0x）
+  - 示例：`创建世界事件 高阶 123456789 3.0`
+- **查看模板**：`世界事件模板`
+  - 列出所有可用事件模板（按难度分类）
+- **监控事件**：`查看世界事件`
+  - 查看所有活动事件（报名中+进行中）
+  - 显示事件ID、难度、状态、参与人数
+- **强制结束**：`结束世界事件 <事件ID>`
+  - 管理员强制结束某个事件
+
+### 🤖 AI文案生成（可选）
+
+- **开场描述**：事件创建时生成修仙风格开场文案（100字左右）
+- **战斗总结**：事件结束时生成含阵亡/幸存者故事的总结（150-200字）
+- **支持平台**：OpenAI（GPT-4/3.5）、Anthropic（Claude）
+- **降级保护**：AI调用失败自动使用固定模板
+- **配置选项**：
+  - `enable_ai_intro`：启用AI开场描述
+  - `enable_ai_summary`：启用AI战斗总结
+  - `ai_provider`：openai / anthropic
+  - `ai_api_key`：API密钥
+  - `ai_model`：模型名称（gpt-4 / claude-3-opus-20240229）
+  - `ai_base_url`：API地址（可选，支持中转）
+  - `fixed_fallback`：AI失败时是否降级为固定模板
+
+### 📝 配置文件扩展
+
+- `config/world_events.json` 新增字段：
+  - `admin_users`：管理员QQ号列表
+  - `broadcast_groups`：允许创建事件的群号白名单（空=所有白名单群）
+  - `ai_config`：AI生成器配置块
+
+### 🔐 权限控制
+
+- 所有管理员指令仅限私聊使用
+- 管理员权限从配置文件读取（`admin_users`）
+- 群号白名单限制（`broadcast_groups`）
+- 非管理员调用时提示无权限
+
+### 🏗️ 架构优化
+
+- 新增 `utils/ai_generator.py`：AI文案生成器（可插拔设计）
+- 新增 `handlers/admin_handlers.py`：管理员指令处理器
+- 扩展 `managers/world_event_manager.py`：5个管理员专用方法
+  - `is_admin()`：权限验证
+  - `create_admin_event()`：创建事件
+  - `list_event_templates()`：列出模板
+  - `get_active_events()`：监控事件
+  - `force_end_event()`：强制结束
+
+### 💡 使用说明
+
+AI功能默认关闭，需手动配置：
+```json
+{
+  "ai_config": {
+    "enable_ai_intro": true,
+    "enable_ai_summary": true,
+    "ai_provider": "openai",
+    "ai_api_key": "sk-your-key-here",
+    "ai_model": "gpt-4"
+  }
+}
+```
+
+---
+
 ## v3.7.0 (2026-09-11) - 世界事件系统（替代历练，批次4）
 
 ### 🌍 新功能：世界事件
