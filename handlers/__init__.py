@@ -28,6 +28,7 @@ from .dual_cultivation_handlers import DualCultivationHandlers
 from .spirit_eye_handlers import SpiritEyeHandlers
 from .mentorship_handlers import MentorshipHandlers
 from .team_handlers import TeamHandlers
+from .revival_handler import RevivalHandler
 
 __all__ = [
     "PlayerHandler",
@@ -56,5 +57,6 @@ __all__ = [
     "DualCultivationHandlers",
     "SpiritEyeHandlers",
     "MentorshipHandlers",
-    "TeamHandlers"
+    "TeamHandlers",
+    "RevivalHandler",
 ]

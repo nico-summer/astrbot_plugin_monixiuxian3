@@ -2,6 +2,7 @@
 from astrbot.api.event import AstrMessageEvent
 from ..managers.adventure_manager import AdventureManager
 from ..data.data_manager import DataBase
+from .utils import soul_state_block_message
 
 class AdventureHandlers:
     def __init__(self, db: DataBase, adv_mgr: AdventureManager):
@@ -32,6 +33,12 @@ class AdventureHandlers:
     async def handle_start_adventure(self, event: AstrMessageEvent, route: str = ""):
         """开始历练"""
         user_id = event.get_sender_id()
+
+        player = await self.db.get_player_by_id(user_id)
+        if player and player.is_soul_state:
+            yield event.plain_result(soul_state_block_message("历练"))
+            return
+
         success, msg = await self.adv_mgr.start_adventure(user_id, route)
         yield event.plain_result(msg)
 

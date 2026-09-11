@@ -7,7 +7,7 @@ from astrbot.api.all import *
 from ..managers.combat_manager import CombatManager, CombatStats
 from ..data.data_manager import DataBase
 from ..core import EquipmentManager
-from .utils import player_required
+from .utils import player_required, soul_state_block_message
 from ..models import Player
 from ..models_extended import UserStatus
 
@@ -179,6 +179,21 @@ class CombatHandlers:
             exp=player.experience
         )
 
+    async def _check_soul_state_for_combat(self, user_id: str, target_id: str) -> str:
+        """元神状态玩家无法参战（PVP 不触发真实死亡，仅做限制）"""
+        attacker = await self.db.get_player_by_id(user_id)
+        if attacker and attacker.is_soul_state:
+            return soul_state_block_message("战斗")
+
+        defender = await self.db.get_player_by_id(target_id)
+        if defender and defender.is_soul_state:
+            name = defender.user_name or f"道友{target_id[:6]}"
+            return (
+                f"⚠️ {name} 处于元神状态，无法战斗！\n"
+                "💡 对方需要先复活才能应战"
+            )
+        return ""
+
     async def handle_duel(self, event: AstrMessageEvent, target: str):
         """决斗 (消耗气血)"""
         user_id = event.get_sender_id()
@@ -190,6 +205,11 @@ class CombatHandlers:
             
         if user_id == target_id:
             yield event.plain_result("❌ 不能和自己决斗")
+            return
+
+        soul_msg = await self._check_soul_state_for_combat(user_id, target_id)
+        if soul_msg:
+            yield event.plain_result(soul_msg)
             return
 
         # 检查发起者状态
@@ -289,6 +309,11 @@ class CombatHandlers:
 
         if user_id == target_id:
             yield event.plain_result("❌ 不能和自己切磋")
+            return
+
+        soul_msg = await self._check_soul_state_for_combat(user_id, target_id)
+        if soul_msg:
+            yield event.plain_result(soul_msg)
             return
 
         # 检查发起者状态

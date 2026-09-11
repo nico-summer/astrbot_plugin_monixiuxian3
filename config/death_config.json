@@ -1,0 +1,8 @@
+{
+  "death_config": {
+    "soul_revival_hours": 24,
+    "soul_exp_loss_rate": 0.05,
+    "rebirth_exp_keep_rate": 0.7,
+    "soul_exp_decay_per_hour": 0.01
+  }
+}

@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 32  # v32: 商店境界货架 + 每人每日刷新次数
+LATEST_DB_VERSION = 33  # v33: 死亡机制重构（元神状态 / 劫后重生）
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -40,6 +40,41 @@ SHOP_REFRESH_USAGE_TABLE_SQL = """
         PRIMARY KEY (user_id, refresh_date)
     )
 """
+
+
+# 死亡机制（批次1）：元神状态相关字段
+SOUL_STATE_COLUMNS = {
+    "is_soul_state": "INTEGER NOT NULL DEFAULT 0",
+    "soul_death_time": "INTEGER NOT NULL DEFAULT 0",
+    "soul_exp_before_death": "INTEGER NOT NULL DEFAULT 0",
+    "used_rebirth": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
+async def repair_soul_state_columns(conn: aiosqlite.Connection) -> bool:
+    """确保 players 表存在元神状态相关字段（幂等）
+
+    新增字段全部带默认值，因此对老库执行 ALTER TABLE 是安全的，
+    既不会丢数据，也不影响未处于元神状态的老玩家。
+
+    Returns:
+        True 表示至少补充过一列，False 表示字段已齐全
+    """
+    async with conn.execute("PRAGMA table_info(players)") as cursor:
+        columns = {row[1] for row in await cursor.fetchall()}
+
+    if not columns:
+        # players 表尚不存在（未初始化），交由后续建表流程处理
+        return False
+
+    repaired = False
+    for column, definition in SOUL_STATE_COLUMNS.items():
+        if column in columns:
+            continue
+        await conn.execute(f"ALTER TABLE players ADD COLUMN {column} {definition}")
+        logger.info(f"已补充 players.{column} 字段")
+        repaired = True
+    return repaired
 
 
 async def repair_shop_refresh_usage_table(conn: aiosqlite.Connection) -> bool:
@@ -259,6 +294,9 @@ class MigrationManager:
             if await repair_shop_refresh_usage_table(self.conn):
                 await self.conn.commit()
                 logger.info("启动自检：shop_refresh_usage 表已创建")
+            if await repair_soul_state_columns(self.conn):
+                await self.conn.commit()
+                logger.info("启动自检：players 元神状态字段已补齐")
         except Exception as e:
             try:
                 await self.conn.rollback()
@@ -563,7 +601,12 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
             last_daily_reset TEXT NOT NULL DEFAULT '',
 
             rift_daily_count TEXT NOT NULL DEFAULT '{}',
-            rift_count_reset_date TEXT NOT NULL DEFAULT ''
+            rift_count_reset_date TEXT NOT NULL DEFAULT '',
+
+            is_soul_state INTEGER NOT NULL DEFAULT 0,
+            soul_death_time INTEGER NOT NULL DEFAULT 0,
+            soul_exp_before_death INTEGER NOT NULL DEFAULT 0,
+            used_rebirth INTEGER NOT NULL DEFAULT 0
         )
     """)
 
@@ -1549,3 +1592,24 @@ async def _migrate_to_v32(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v32迁移完成：商店境界货架")
+
+
+@migration(33)
+async def _migrate_to_v33(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v33 - 死亡机制重构
+
+    为 players 表补充元神状态 / 劫后重生相关字段：
+    - is_soul_state：是否处于元神状态
+    - soul_death_time：进入元神状态的时间戳
+    - soul_exp_before_death：死亡前修为（复活结算用）
+    - used_rebirth：是否已使用过「劫后重生」（低阶修士仅一次）
+    """
+    logger.info("开始迁移到v33：死亡机制重构（元神状态字段）")
+
+    repaired = await repair_soul_state_columns(conn)
+    if repaired:
+        logger.info("v33迁移完成：players 元神状态字段已补齐")
+    else:
+        logger.info("v33迁移完成：players 元神状态字段已存在，无需变更")
+
+    await conn.commit()

@@ -7,6 +7,7 @@ from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.event import AstrMessageEvent, filter
 from .data import DataBase, MigrationManager
 from .config_manager import ConfigManager
+from .handlers.utils import set_soul_state_config
 from .handlers import (
     MiscHandler, HelpHandler, PlayerHandler, EquipmentHandler, BreakthroughHandler,
     PillHandler, ShopHandler, StorageRingHandler,
@@ -14,7 +15,7 @@ from .handlers import (
     RiftHandlers, AdventureHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
     BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
-    MentorshipHandlers, TeamHandlers
+    MentorshipHandlers, TeamHandlers, RevivalHandler
 )
 from .managers import (
     CombatManager, SectManager, BossManager, RiftManager,
@@ -58,6 +59,7 @@ CMD_HELP_TOPICS = {
     "双修": "双修帮助",
     "传承": "传承帮助",
     "排行": "排行帮助",
+    "死亡": "死亡帮助",
 }
 CMD_START_XIUXIAN = "我要修仙"
 CMD_PLAYER_INFO = "我的信息"
@@ -229,6 +231,10 @@ CMD_TEAM_LOOT = "队伍掉落"
 CMD_ASSIGN_LOOT = "分配物品"
 
 CMD_REBIRTH = "弃道重修"
+
+# 死亡机制 / 复活系统指令（批次1）
+CMD_SOUL_STATE = "元神状态"
+CMD_NATURAL_REVIVAL = "自然复活"
 class XiuXianPlugin(Star):
     """修仙插件 - 文字修仙游戏"""
 
@@ -309,6 +315,14 @@ class XiuXianPlugin(Star):
         # 组队系统
         self.team_mgr = TeamManager(self.db)
         self.team_handlers = TeamHandlers(self.db, self.team_mgr, self.rift_mgr)
+
+        # 死亡机制（批次1）：复活系统
+        self.death_config = self.config_manager.get_death_config()
+        self.revival_handler = RevivalHandler(
+            self.db, config=self.death_config, config_manager=self.config_manager
+        )
+        # 注入死亡配置，供 player_required 自动复活检查使用
+        set_soul_state_config(self.death_config)
 
         self.boss_task = None # Boss生成任务
         self.loan_check_task = None # 贷款逾期检查任务
@@ -926,6 +940,26 @@ class XiuXianPlugin(Star):
         async for r in self.player_handler.handle_rebirth(event, confirm):
             yield r
 
+    @filter.command(CMD_SOUL_STATE, "查看元神状态")
+    @require_whitelist
+    async def handle_soul_state(self, event: AstrMessageEvent):
+        """查看元神状态（死亡机制：金丹期以上死亡后进入）"""
+        player = await self.db.get_player_by_id(str(event.get_sender_id()))
+        if not player:
+            yield event.plain_result("你还未踏入修仙之路，发送「我要修仙」开始修炼")
+            return
+        yield event.plain_result(self.revival_handler.check_soul_state(player))
+
+    @filter.command(CMD_NATURAL_REVIVAL, "自然复活（元神状态专属）")
+    @require_whitelist
+    async def handle_natural_revival(self, event: AstrMessageEvent):
+        """元神状态自然复活（等待期满后可用）"""
+        player = await self.db.get_player_by_id(str(event.get_sender_id()))
+        if not player:
+            yield event.plain_result("你还未踏入修仙之路，发送「我要修仙」开始修炼")
+            return
+        yield event.plain_result(await self.revival_handler.natural_revival(player))
+
     @filter.command(CMD_START_CULTIVATION, "开始闭关修炼")
     @require_whitelist
     async def handle_start_cultivation(self, event: AstrMessageEvent):
@@ -1376,6 +1410,11 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_boss_fight(self, event: AstrMessageEvent):
         user_id = event.get_sender_id()
+        player = await self.db.get_player_by_id(str(user_id))
+        if player and player.is_soul_state:
+            from .handlers.utils import soul_state_block_message
+            yield event.plain_result(soul_state_block_message("战斗"))
+            return
         success, msg, battle_result = await self.boss_handlers.handle_boss_fight(user_id)
         yield event.plain_result(msg)
         

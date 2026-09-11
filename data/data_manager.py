@@ -73,8 +73,9 @@ class DataBase:
                 blessed_spot_flag, blessed_spot_name,
                 active_pill_effects, permanent_pill_gains, has_resurrection_pill, has_debuff_shield, pills_inventory,
                 storage_ring, storage_ring_items,
-                daily_pill_usage, last_daily_reset
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                daily_pill_usage, last_daily_reset,
+                is_soul_state, soul_death_time, soul_exp_before_death, used_rebirth
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 player.user_id,
@@ -121,7 +122,11 @@ class DataBase:
                 player.storage_ring,
                 player.storage_ring_items,
                 player.daily_pill_usage,
-                player.last_daily_reset
+                player.last_daily_reset,
+                int(player.is_soul_state or 0),
+                int(player.soul_death_time or 0),
+                int(player.soul_exp_before_death or 0),
+                int(player.used_rebirth or 0)
             )
         )
         await self.conn.commit()
@@ -201,7 +206,11 @@ class DataBase:
                 daily_pill_usage = ?,
                 last_daily_reset = ?,
                 rift_daily_count = ?,
-                rift_count_reset_date = ?
+                rift_count_reset_date = ?,
+                is_soul_state = ?,
+                soul_death_time = ?,
+                soul_exp_before_death = ?,
+                used_rebirth = ?
             WHERE user_id = ?
             """,
             (
@@ -251,6 +260,10 @@ class DataBase:
                 player.last_daily_reset,
                 player.rift_daily_count,
                 player.rift_count_reset_date,
+                int(player.is_soul_state or 0),
+                int(player.soul_death_time or 0),
+                int(player.soul_exp_before_death or 0),
+                int(player.used_rebirth or 0),
                 player.user_id
             )
         )

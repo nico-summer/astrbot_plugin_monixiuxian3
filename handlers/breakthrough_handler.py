@@ -5,7 +5,7 @@ from ..data import DataBase
 from ..core import BreakthroughManager, PillManager
 from ..config_manager import ConfigManager
 from ..models import Player
-from .utils import player_required
+from .utils import player_required, soul_state_block_message
 
 CMD_BREAKTHROUGH = "突破"
 CMD_BREAKTHROUGH_INFO = "突破信息"
@@ -28,6 +28,17 @@ class BreakthroughHandler:
     async def handle_breakthrough_info(self, player: Player, event: AstrMessageEvent):
         """查看突破信息"""
         display_name = event.get_sender_name()
+
+        if player.is_soul_state:
+            yield event.plain_result(
+                "👻 你正处于【元神状态】，肉身尚未重塑\n"
+                "━━━━━━━━━━━━━━━\n"
+                "元神状态下无法突破，请先复活：\n"
+                "· 等待期满后发送「自然复活」（会损失部分修为）\n"
+                "· 使用还魂丹可立即完美复活\n"
+                "💡 发送「元神状态」查看元神详情"
+            )
+            return
 
         # 根据修炼类型获取对应的境界数据
         level_data = self.config_manager.get_level_data(player.cultivation_type)
@@ -107,8 +118,9 @@ class BreakthroughHandler:
                 f"【突破说明】\n",
                 f"• 使用命令：{CMD_BREAKTHROUGH} 或 {CMD_BREAKTHROUGH} [破境丹名称]\n",
                 f"• 突破成功：境界提升，肉身更强\n",
-                f"• 突破失败：损失10%修为，有概率死亡\n",
-                f"• 死亡后：所有数据清除，需重新入仙途\n",
+                f"• 突破失败：损失10%修为，有概率走火入魔\n",
+                f"• 练气-筑基：首次死亡触发「劫后重生」（境界倒退1级，保留70%修为），再死则彻底陨落\n",
+                f"• 金丹期以上：死亡进入【元神状态】，可等待自然复活或使用还魂丹\n",
                 f"=" * 28
             ])
         else:
@@ -117,8 +129,9 @@ class BreakthroughHandler:
                 f"【突破说明】\n",
                 f"• 使用命令：{CMD_BREAKTHROUGH} 或 {CMD_BREAKTHROUGH} [破境丹名称]\n",
                 f"• 突破成功：境界提升，实力大增\n",
-                f"• 突破失败：损失10%修为，有概率死亡\n",
-                f"• 死亡后：所有数据清除，需重新入仙途\n",
+                f"• 突破失败：损失10%修为，有概率走火入魔\n",
+                f"• 练气-筑基：首次死亡触发「劫后重生」（境界倒退1级，保留70%修为），再死则彻底陨落\n",
+                f"• 金丹期以上：死亡进入【元神状态】，可等待自然复活或使用还魂丹\n",
                 f"=" * 28
             ])
 
@@ -132,11 +145,20 @@ class BreakthroughHandler:
             yield event.plain_result("⏳ 你上一次突破仍在处理中，请勿重复提交。")
             return
 
+        player_check = await self.db.get_player_by_id(user_id)
+        if player_check and player_check.is_soul_state:
+            yield event.plain_result(soul_state_block_message("突破"))
+            return
+
         self._active_breakthroughs.add(user_id)
         try:
             fresh_player = await self.db.get_player_by_id(user_id)
             if not fresh_player:
                 yield event.plain_result("道友尚未踏入仙途。")
+                return
+
+            if fresh_player.is_soul_state:
+                yield event.plain_result(soul_state_block_message("突破"))
                 return
 
             async for result in self._execute_breakthrough(fresh_player, event, pill_name):

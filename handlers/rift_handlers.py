@@ -2,6 +2,7 @@
 from astrbot.api.event import AstrMessageEvent
 from ..managers.rift_manager import RiftManager
 from ..data.data_manager import DataBase
+from .utils import soul_state_block_message
 
 class RiftHandlers:
     def __init__(self, db: DataBase, rift_mgr: RiftManager):
@@ -21,6 +22,11 @@ class RiftHandlers:
         if not rift_id:
             yield event.plain_result("❌ 请输入秘境ID")
             return
+
+        player = await self.db.get_player_by_id(user_id)
+        if player and player.is_soul_state:
+            yield event.plain_result(soul_state_block_message("进行秘境探索"))
+            return
         success, msg = await self.rift_mgr.enter_rift(user_id, int(rift_id))
         yield event.plain_result(msg)
         
@@ -39,5 +45,10 @@ class RiftHandlers:
     async def handle_sect_rift(self, event: AstrMessageEvent, level: int):
         """进入宗门秘境"""
         user_id = event.get_sender_id()
+
+        player = await self.db.get_player_by_id(user_id)
+        if player and player.is_soul_state:
+            yield event.plain_result(soul_state_block_message("进行秘境探索"))
+            return
         success, msg = await self.rift_mgr.enter_sect_rift(user_id, level)
         yield event.plain_result(msg)

@@ -80,3 +80,9 @@ ALCHEMY_CONFIG = {
         },
     }
 }
+
+# 死亡系统配置（批次1：死亡机制重构）
+# 默认值统一定义在 utils/death_config.py，避免多处维护导致不一致
+DEATH_CONFIG = {
+    "death_config": dict(DEFAULT_DEATH_CONFIG),
+}

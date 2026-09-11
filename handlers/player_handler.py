@@ -70,9 +70,9 @@ class PlayerHandler:
                 "• 精神力：100-500\n"
                 "━━━━━━━━━━━━━━━\n"
                 "⚠️ 修仙风险警告 ⚠️\n"
-                "• 突破失败有概率走火入魔身死道消\n"
-                "• 生命值归零也会导致死亡\n"
-                "• 死亡后所有数据清除，需重新入仙途\n"
+                "• 突破失败有概率走火入魔\n"
+                "• 练气-筑基：首次死亡触发「劫后重生」，第二次彻底陨落\n"
+                "• 金丹期以上：死亡进入【元神状态】，可等待复活或使用还魂丹\n"
                 "━━━━━━━━━━━━━━━\n"
                 f"💡 使用方法：\n"
                 f"  {CMD_START_XIUXIAN} 灵修\n"
@@ -104,8 +104,8 @@ class PlayerHandler:
             f"启动资金：{new_player.gold} 灵石\n"
             f"━━━━━━━━━━━━━━━\n"
             f"⚠️ 修仙有风险，突破需谨慎！\n"
-            f"突破失败或生命值归零会导致\n"
-            f"身死道消，所有数据清除！\n"
+            f"练气-筑基首次死亡可「劫后重生」保命一次，\n"
+            f"金丹期以上死亡将进入【元神状态】等待复活！\n"
             f"━━━━━━━━━━━━━━━\n"
             f"💡 发送「{CMD_PLAYER_INFO}」查看状态"
         )
@@ -224,6 +224,25 @@ class PlayerHandler:
                 f"  物防：{total_attrs['physical_defense']}\n"
             )
         
+        # 元神状态提示（批次1：死亡机制）
+        if player.is_soul_state:
+            from .revival_handler import RevivalHandler
+            revival = RevivalHandler(
+                self.db,
+                config=self.config_manager.get_death_config(),
+                config_manager=self.config_manager,
+            )
+            progress = revival.get_soul_progress(player)
+            reply_msg += (
+                f"\n"
+                f"【元神状态】👻\n"
+                f"  ⏰ 已流逝：{progress['elapsed_text']}\n"
+                f"  💫 修为流失：{progress['decay_percent']:.1f}%\n"
+                f"  🕐 自然复活剩余：{progress['remaining_text']}\n"
+                f"  ⚠️ 元神状态无法修炼与战斗\n"
+                f"  💡 发送「元神状态」查看详情，「自然复活」期满后复活\n"
+            )
+
         reply_msg += (
             f"\n"
             f"【装备信息】\n"
@@ -320,6 +339,12 @@ class PlayerHandler:
     @player_required
     async def handle_start_cultivation(self, player: Player, event: AstrMessageEvent):
         """处理闭关指令"""
+        # 元神状态无法修炼（批次1：死亡机制）
+        if player.is_soul_state:
+            from .utils import soul_state_block_message
+            yield event.plain_result(soul_state_block_message("修炼"))
+            return
+
         # 检查是否已经在闭关
         if player.state == "修炼中":
             yield event.plain_result("道友已在闭关中，请勿重复进入。")

@@ -7,6 +7,7 @@ from functools import wraps
 from typing import Callable, Coroutine, AsyncGenerator
 
 from astrbot.api.event import AstrMessageEvent
+from astrbot.api import logger
 from ..models import Player
 from ..models_extended import UserStatus
 
@@ -16,6 +17,9 @@ CMD_PLAYER_INFO = "我的信息"
 CMD_START_CULTIVATION = "闭关"
 CMD_END_CULTIVATION = "出关"
 CMD_CHECK_IN = "签到"
+# 死亡机制 / 复活系统指令（批次1）
+CMD_SOUL_STATE = "元神状态"
+CMD_NATURAL_REVIVAL = "自然复活"
 
 # 忙碌状态下允许执行的命令白名单
 BUSY_STATE_ALLOWED_COMMANDS = [
@@ -52,6 +56,9 @@ BUSY_STATE_ALLOWED_COMMANDS = [
     "存款榜",
     # 帮助信息
     "修仙帮助",
+    # 死亡/复活相关（任何状态下都应可用）
+    CMD_SOUL_STATE,
+    CMD_NATURAL_REVIVAL,
     # 闭关相关
     CMD_END_CULTIVATION,
     "出关",
@@ -60,6 +67,203 @@ BUSY_STATE_ALLOWED_COMMANDS = [
     "结束秘境",
     "结束任务",
 ]
+
+# ===== 元神状态（批次1：死亡机制重构） =====
+
+# 元神状态下仍可使用的指令（只读查询 / 复活相关）
+SOUL_STATE_ALLOWED_COMMANDS = [
+    # 基础信息与帮助
+    CMD_PLAYER_INFO,
+    "我的信息",
+    CMD_CHECK_IN,
+    "签到",
+    "修仙帮助",
+    CMD_SOUL_STATE,
+    CMD_NATURAL_REVIVAL,
+    "使用还魂丹",
+    "还魂丹",
+    # 背包 / 商店浏览（只读）
+    "丹药背包",
+    "我的装备",
+    "改道号",
+    "储物戒",
+    "查看储物戒",
+    "物品信息",
+    "材料查询",
+    "丹药信息",
+    "炼化图鉴",
+    "丹阁",
+    "器阁",
+    "百宝阁",
+    "刷新商店",
+    "购买",
+    # 银行
+    "银行",
+    "存灵石",
+    "取灵石",
+    "领取利息",
+    "还款",
+    "银行流水",
+    # 排行榜 / 只读面板
+    "排行榜",
+    "境界排行",
+    "战力排行",
+    "灵石排行",
+    "宗门排行",
+    "存款排行",
+    "贡献排行",
+    "宗门列表",
+    "我的宗门",
+    "师徒信息",
+    "我的灵田",
+    "我的洞天",
+    "灵眼信息",
+    "悬赏令",
+    "悬赏状态",
+    "秘境列表",
+    "历练信息",
+    "历练状态",
+    "突破信息",
+    "我的队伍",
+    "队伍信息",
+    # 结算/退出进行中的活动（避免元神后卡在忙碌状态）
+    "出关",
+    "完成历练",
+    "完成探索",
+    "退出秘境",
+    "完成组队",
+]
+
+# 元神状态下禁止的指令前缀 -> 提示中的动作名
+SOUL_STATE_FORBIDDEN_ACTIONS = [
+    ("闭关", "修炼"),
+    ("突破", "突破"),
+    ("开始历练", "历练"),
+    ("历练", "历练"),
+    ("探索秘境", "进行秘境探索"),
+    ("宗门秘境", "进行秘境探索"),
+    ("挑战boss", "战斗"),
+    ("世界boss", "战斗"),
+    ("决斗", "战斗"),
+    ("切磋", "战斗"),
+    ("传承挑战", "战斗"),
+    ("组队探索", "组队探险"),
+    ("创建队伍", "组队"),
+    ("邀请入队", "组队"),
+    ("加入队伍", "组队"),
+    ("炼化材料", "炼化材料"),
+    ("一键炼化", "炼化材料"),
+    ("炼丹", "炼丹"),
+    ("种植", "种植"),
+    ("收获", "种植"),
+    ("开垦灵田", "开垦灵田"),
+    ("升级灵田", "升级灵田"),
+    ("双修", "双修"),
+    ("接受双修", "双修"),
+    ("收徒", "收徒"),
+    ("拜师", "拜师"),
+    ("灌顶", "灌顶"),
+    ("接取悬赏", "接取悬赏"),
+    ("完成悬赏", "完成悬赏"),
+    ("放弃悬赏", "放弃悬赏"),
+    ("抢占灵眼", "抢占灵眼"),
+    ("灵眼收取", "收取灵眼"),
+    ("释放灵眼", "释放灵眼"),
+    ("洞天收取", "收取洞天产出"),
+    ("购买洞天", "购买洞天"),
+    ("升级洞天", "升级洞天"),
+    ("转让洞天", "转让洞天"),
+    ("宗门捐献", "处理宗门事务"),
+    ("宗门建设", "处理宗门事务"),
+    ("宗门任务", "处理宗门事务"),
+    ("捐献功法", "处理宗门事务"),
+    ("借用功法", "处理宗门事务"),
+    ("创建宗门", "处理宗门事务"),
+    ("加入宗门", "处理宗门事务"),
+    ("退出宗门", "处理宗门事务"),
+    ("职位变更", "处理宗门事务"),
+    ("踢出成员", "处理宗门事务"),
+    ("宗主传位", "处理宗门事务"),
+    ("突破贷款", "申请贷款"),
+    ("赠予", "赠予物品"),
+    ("接收", "赠予"),
+    ("弃道重修", "弃道重修"),
+]
+
+# 由 main.py 注入的死亡系统配置（供自动复活使用）
+_soul_state_config: dict = {}
+
+
+def set_soul_state_config(config: dict):
+    """注入死亡系统配置（main.py 初始化时调用）"""
+    global _soul_state_config
+    _soul_state_config = dict(config) if isinstance(config, dict) else {}
+
+
+def get_soul_state_config() -> dict:
+    """获取已注入的死亡系统配置"""
+    return dict(_soul_state_config)
+
+
+def soul_state_block_message(action: str = "") -> str:
+    """生成元神状态禁止操作的统一提示"""
+    action = action or "进行此操作"
+    return (
+        f"⚠️ 元神状态无法{action}，请先复活！\n"
+        f"💡 发送「{CMD_SOUL_STATE}」查看元神详情\n"
+        f"发送「{CMD_NATURAL_REVIVAL}」等待期满后自然复活"
+    )
+
+
+def _match_command(text: str, cmd: str) -> bool:
+    """判断指令文本是否命中指定指令（要求带参数时以空格分隔，避免前缀误伤）"""
+    if not cmd:
+        return False
+    return text == cmd or text.startswith(f"{cmd} ")
+
+
+def get_soul_state_block_message(message_text: str) -> str:
+    """判断该指令在元神状态下是否被禁止
+
+    Returns:
+        禁止时返回提示消息；允许时返回空字符串
+    """
+    text = (message_text or "").strip().lstrip("/").strip()
+    if not text:
+        return ""
+
+    # 所有「XX帮助」类指令始终可用
+    if text.endswith("帮助"):
+        return ""
+
+    for cmd in SOUL_STATE_ALLOWED_COMMANDS:
+        if _match_command(text, cmd):
+            return ""
+
+    for cmd, action in SOUL_STATE_FORBIDDEN_ACTIONS:
+        if _match_command(text, cmd):
+            return soul_state_block_message(action)
+
+    return soul_state_block_message("进行此操作")
+
+
+async def _auto_revive_soul_state(db, player: Player) -> tuple:
+    """超时未复活的元神玩家自动强制复活
+
+    Returns:
+        (是否已自动复活, 消息)
+    """
+    try:
+        from .revival_handler import RevivalHandler
+    except Exception:
+        return False, ""
+
+    try:
+        handler = RevivalHandler(db, config=get_soul_state_config())
+        return await handler.check_and_auto_revive(player)
+    except Exception as e:
+        logger.warning(f"[复活系统] 自动复活检查失败: {e}")
+        return False, ""
 
 
 def player_required(func: Callable[..., Coroutine[any, any, AsyncGenerator[any, None]]]):
@@ -86,7 +290,23 @@ def player_required(func: Callable[..., Coroutine[any, any, AsyncGenerator[any, 
                 return
         
         message_text = event.get_message_str().strip()
-        
+
+        # 元神状态检查（批次1）：超时自动复活 + 禁止修炼/战斗等操作
+        if player.is_soul_state:
+            revived, revive_msg = await _auto_revive_soul_state(self.db, player)
+            if revived:
+                # 自动复活后数据库已更新，重新加载玩家对象，避免继续使用过期数据
+                player = await self.db.get_player_by_id(player.user_id) or player
+                if revive_msg:
+                    yield event.plain_result(revive_msg)
+
+            # 重新检查元神状态（可能已被自动复活）
+            if player.is_soul_state:
+                block_msg = get_soul_state_block_message(message_text)
+                if block_msg:
+                    yield event.plain_result(block_msg)
+                    return
+
         # 检查 user_cd 表的忙碌状态
         user_cd = await self.db.ext.get_user_cd(player.user_id)
         if user_cd and user_cd.type != UserStatus.IDLE:

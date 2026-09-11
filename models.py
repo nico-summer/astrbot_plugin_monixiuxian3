@@ -129,6 +129,12 @@ class Player:
     rift_daily_count: str = "{}"  # 每日秘境探索次数（JSON字符串，格式：{rift_id: count}）
     rift_count_reset_date: str = ""  # 秘境次数重置日期（格式：YYYY-MM-DD）
 
+    # 死亡机制（批次1）：元神状态 / 劫后重生
+    is_soul_state: bool = False  # 是否为元神状态（金丹期以上突破死亡后进入）
+    soul_death_time: int = 0  # 进入元神状态的时间戳（0表示未处于元神状态）
+    soul_exp_before_death: int = 0  # 死亡前的修为（用于复活时按比例结算）
+    used_rebirth: bool = False  # 是否已使用过「劫后重生」（低阶修士专属，仅一次）
+
     def get_level(self, config_manager: "ConfigManager") -> str:
         """获取境界名称"""
         level_data = config_manager.get_level_data(self.cultivation_type)

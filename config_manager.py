@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from astrbot.api import logger
-from .data.default_configs import SECT_CONFIG, BOSS_CONFIG, RIFT_CONFIG, ALCHEMY_CONFIG
+from .data.default_configs import SECT_CONFIG, BOSS_CONFIG, RIFT_CONFIG, ALCHEMY_CONFIG, DEATH_CONFIG
 
 class ConfigManager:
     """配置管理器，加载境界、物品、武器和丹药配置"""
@@ -24,6 +24,7 @@ class ConfigManager:
         self.boss_config: Dict[str, Any] = {}
         self.rift_config: Dict[str, Any] = {}
         self.alchemy_config: Dict[str, Any] = {}
+        self.death_config: Dict[str, Any] = {}  # 死亡系统配置（批次1）
         
         self._load_all()
 
@@ -117,6 +118,7 @@ class ConfigManager:
         self.boss_config = self._load_config_with_default(config_dir / "boss_config.json", BOSS_CONFIG)
         self.rift_config = self._load_config_with_default(config_dir / "rift_config.json", RIFT_CONFIG)
         self.alchemy_config = self._load_config_with_default(config_dir / "alchemy_config.json", ALCHEMY_CONFIG)
+        self.death_config = self._load_config_with_default(config_dir / "death_config.json", DEATH_CONFIG)
         self.alchemy_recipes = self._load_items_data(config_dir / "alchemy_recipes.json")
         
         # 加载游戏配置（包含各系统的硬编码参数）
@@ -131,6 +133,33 @@ class ConfigManager:
             f"以及新系统配置 (宗门/Boss/秘境/炼丹)"
         )
     
+    def get_death_config(self) -> Dict[str, Any]:
+        """获取死亡系统配置（自动兼容「含 death_config 外层键」与「扁平结构」两种写法）
+
+        优先级：嵌套格式 {"death_config": {...}} > 扁平格式 > 内置默认值
+        """
+        # 获取内置默认值
+        default = dict(DEATH_CONFIG.get("death_config", {}))
+
+        config = self.death_config or {}
+        if not isinstance(config, dict):
+            return default
+
+        # 优先读取嵌套格式 {"death_config": {...}}
+        nested = config.get("death_config")
+        if isinstance(nested, dict) and nested:
+            result = dict(default)
+            result.update({k: v for k, v in nested.items() if v is not None})
+            return result
+
+        # 回退到扁平格式（直接包含配置项）
+        if config:
+            result = dict(default)
+            result.update({k: v for k, v in config.items() if k in default and v is not None})
+            return result
+
+        return default
+
     def is_pill(self, item_name: str) -> bool:
         """检查物品是否为丹药类型（统一的丹药判断方法）"""
         if item_name in self.pills_data:
