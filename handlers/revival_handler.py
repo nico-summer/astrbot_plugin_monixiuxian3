@@ -64,6 +64,25 @@ class RevivalHandler:
         except (TypeError, ValueError):
             return default
 
+    def _get_merged_config(self) -> dict:
+        """合并配置：ConfigManager（文件）> 插件配置 > 内置默认值"""
+        merged = DEFAULT_DEATH_CONFIG.copy()
+
+        # 从插件配置中读取
+        if self.config:
+            merged.update(self.config.get("death_config", {}))
+
+        # 从 ConfigManager 中读取（优先级最高）
+        if self.config_manager:
+            try:
+                death_cfg = self.config_manager.get("death_config", {})
+                if death_cfg:
+                    merged.update(death_cfg)
+            except Exception as e:
+                logger.warning(f"读取 death_config 失败: {e}")
+
+        return merged
+
     def _resolve_death_config(self) -> dict:
         """合并配置：ConfigManager（文件）> 插件配置 > 内置默认值"""
         return self._get_merged_config()
