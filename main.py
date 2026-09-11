@@ -18,6 +18,8 @@ from .handlers import (
     BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
     CommissionHandlers, MentorshipHandlers, TeamHandlers, RevivalHandler,
 )
+# 管理员功能（批次5）
+from .handlers.admin_handlers import AdminHandlers
 from .managers import (
     CombatManager, SectManager, BossManager, RiftManager,
     RankingManager, WorldEventManager, AlchemyManager, ImpartManager,
@@ -300,6 +302,9 @@ class XiuXianPlugin(Star):
         self.ranking_handlers = RankingHandlers(self.db, self.rank_mgr)
         self.rift_handlers = RiftHandlers(self.db, self.rift_mgr)
         self.world_event_handlers = WorldEventHandlers(self.db, self.world_event_mgr)
+
+        # 管理员处理器（批次5）
+        self.admin_handlers = AdminHandlers(self.world_event_mgr)
         self.alchemy_handlers = AlchemyHandlers(self.db, self.alchemy_mgr)
         self.commission_handlers = CommissionHandlers(
             self.db, self.commission_mgr, self.alchemy_mgr
@@ -1704,6 +1709,28 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_world_event_record(self, event: AstrMessageEvent):
         async for r in self.world_event_handlers.handle_record(event):
+            yield r
+
+    # ==================== 管理员指令（批次5，仅私聊） ====================
+
+    @filter.command("创建世界事件", "管理员手动创建世界事件（仅私聊）")
+    async def handle_admin_create_event(self, event: AstrMessageEvent):
+        async for r in self.admin_handlers.handle_create_event(event):
+            yield r
+
+    @filter.command("世界事件模板", "查看所有事件模板（仅私聊）")
+    async def handle_admin_list_templates(self, event: AstrMessageEvent):
+        async for r in self.admin_handlers.handle_list_templates(event):
+            yield r
+
+    @filter.command("查看世界事件", "查看所有活动事件（管理员专用，仅私聊）")
+    async def handle_admin_active_events(self, event: AstrMessageEvent):
+        async for r in self.admin_handlers.handle_active_events(event):
+            yield r
+
+    @filter.command("结束世界事件", "强制结束某个事件（仅私聊）")
+    async def handle_admin_force_end_event(self, event: AstrMessageEvent):
+        async for r in self.admin_handlers.handle_force_end_event(event):
             yield r
 
     # ===== 炼丹指令 =====
