@@ -133,22 +133,32 @@ class AdminHandlers:
         yield event.plain_result(success_msg)
 
         # 创建成功后立即广播到目标群（含 AI 开场文案，AI 未开启时用固定模板）
-        if success and event_id and self.broadcaster:
-            try:
-                # 确保 event_id 是整数
-                event_id_int = int(event_id) if not isinstance(event_id, int) else event_id
-                created_event = await self.world_event_mgr.get_event(event_id_int)
-                if created_event:
-                    event_data = created_event.get("data") or {}
-                    intro = await self.world_event_mgr.generate_intro_text(event_data, 0)
-                    text = self.world_event_mgr.format_event_broadcast(created_event, 0, intro)
-                    await self.broadcaster(str(group_id), text)
-                    logger.info(f"[世界事件] 管理员事件已广播到群 {group_id}")
-                else:
-                    logger.warning(f"[世界事件] 未能查询到刚创建的事件 ID={event_id_int}")
-            except Exception as e:
-                logger.warning(f"[世界事件] 管理员事件广播失败: {e}", exc_info=True)
-                yield event.plain_result(f"⚠️ 事件已创建，但广播失败：{e}")
+        if success and event_id:
+            if not self.broadcaster:
+                logger.warning(f"[世界事件] broadcaster 未配置，无法广播事件到群 {group_id}")
+                yield event.plain_result("⚠️ 事件已创建，但 broadcaster 未配置，请手动通知群成员")
+            else:
+                try:
+                    # 确保 event_id 是整数
+                    event_id_int = int(event_id) if not isinstance(event_id, int) else event_id
+                    logger.info(f"[世界事件] 准备广播事件 ID={event_id_int} 到群 {group_id}")
+
+                    created_event = await self.world_event_mgr.get_event(event_id_int)
+                    if created_event:
+                        event_data = created_event.get("data") or {}
+                        intro = await self.world_event_mgr.generate_intro_text(event_data, 0)
+                        text = self.world_event_mgr.format_event_broadcast(created_event, 0, intro)
+
+                        logger.info(f"[世界事件] 开始调用 broadcaster，目标群 {group_id}")
+                        await self.broadcaster(str(group_id), text)
+                        logger.info(f"[世界事件] 管理员事件已广播到群 {group_id}")
+                        yield event.plain_result(f"✅ 事件已成功广播到群 {group_id}")
+                    else:
+                        logger.warning(f"[世界事件] 未能查询到刚创建的事件 ID={event_id_int}")
+                        yield event.plain_result(f"⚠️ 事件已创建，但查询失败，无法广播")
+                except Exception as e:
+                    logger.error(f"[世界事件] 管理员事件广播失败: {e}", exc_info=True)
+                    yield event.plain_result(f"⚠️ 事件已创建，但广播失败：{e}")
 
     async def handle_list_templates(self, event: AstrMessageEvent):
         """世界事件模板"""
