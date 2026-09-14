@@ -118,7 +118,7 @@ class AdminHandlers:
                 yield event.plain_result("❌ 奖励倍率必须是数字")
                 return
 
-        success, event_name, event_id = await self.world_event_mgr.create_admin_event(
+        success, success_msg, event_id = await self.world_event_mgr.create_admin_event(
             admin_id=user_id,
             tier=tier,
             group_id=group_id,
@@ -126,22 +126,10 @@ class AdminHandlers:
         )
 
         if not success:
-            yield event.plain_result(event_name)  # event_name 此时是错误消息
+            yield event.plain_result(success_msg)  # success_msg 此时是错误消息
             return
 
-        # 成功：构建成功消息
-        tier_names = {"low": "低阶", "mid": "中阶", "high": "高阶", "epic": "史诗"}
-        success_msg = (
-            f"✅ 世界事件创建成功！\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"📋 事件ID：{event_id}\n"
-            f"🌟 {event_name}\n"
-            f"⚔️ 难度：{tier_names.get(tier, tier)}\n"
-            f"🎁 奖励倍率：{reward_multiplier}x\n"
-            f"📢 目标群：{group_id}\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"事件已创建，正在广播到目标群..."
-        )
+        # 成功：直接使用返回的成功消息
         yield event.plain_result(success_msg)
 
         # 创建成功后立即广播到目标群（含 AI 开场文案，AI 未开启时用固定模板）
