@@ -10,6 +10,7 @@
 
 from typing import TYPE_CHECKING
 
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 if TYPE_CHECKING:
@@ -19,15 +20,48 @@ __all__ = ["AdminHandlers"]
 
 
 class AdminHandlers:
-    """管理员指令处理器"""
+    """管理员指令处理器（仅私聊）
 
-    def __init__(self, world_event_manager: "WorldEventManager"):
+    通过 ``broadcaster`` 回调把新建事件广播到目标群（由 main.py 注入），
+    因为处理器本身只负责生成回复内容，不直接操作平台会话。
+    """
+
+    def __init__(self, world_event_manager: "WorldEventManager", broadcaster=None):
         self.world_event_mgr = world_event_manager
+        self.broadcaster = broadcaster
+
+    @staticmethod
+    def _is_private(event: AstrMessageEvent) -> bool:
+        """判断是否私聊（兼容不同 AstrBot 版本的适配器实现）"""
+        group_id = None
+        getter = getattr(event, "get_group_id", None)
+        if callable(getter):
+            try:
+                group_id = getter()
+            except Exception:
+                group_id = None
+        if group_id:
+            return False
+
+        message_obj = getattr(event, "message_obj", None)
+        is_private = getattr(message_obj, "is_private", None)
+        if isinstance(is_private, bool):
+            return is_private
+
+        # 取不到群号时视为私聊
+        return True
+
+    @staticmethod
+    def _command_args(event: AstrMessageEvent) -> list:
+        """按空格切分指令参数（首项为指令名）"""
+        text = str(getattr(event, "message_str", "") or "").strip()
+        return text.split()
+
 
     async def handle_create_event(self, event: AstrMessageEvent):
         """创建世界事件 <难度> <群号> [奖励倍率]"""
         # 只允许私聊
-        if not event.message_obj.is_private:
+        if not self._is_private(event):
             yield event.plain_result("⚠️ 该指令仅限私聊使用")
             return
 
@@ -36,7 +70,7 @@ class AdminHandlers:
             yield event.plain_result("⚠️ 你没有管理员权限")
             return
 
-        args = event.message_str.strip().split()
+        args = self._command_args(event)
         if len(args) < 3:
             yield event.plain_result(
                 "用法：创建世界事件 <难度> <群号> [奖励倍率]\n"
@@ -93,14 +127,22 @@ class AdminHandlers:
 
         yield event.plain_result(msg)
 
-        # 如果创建成功，提示已广播
-        if success and event_id:
-            # 实际广播由定时任务或main.py中的逻辑处理
-            pass
+        # 创建成功后立即广播到目标群（含 AI 开场文案，AI 未开启时用固定模板）
+        if success and event_id and self.broadcaster:
+            try:
+                created_event = await self.world_event_mgr.get_event(event_id)
+                if created_event:
+                    event_data = created_event.get("data") or {}
+                    intro = await self.world_event_mgr.generate_intro_text(event_data, 0)
+                    text = self.world_event_mgr.format_event_broadcast(created_event, 0, intro)
+                    await self.broadcaster(str(group_id), text)
+            except Exception as e:
+                logger.warning(f"[世界事件] 管理员事件广播失败: {e}")
+                yield event.plain_result(f"⚠️ 事件已创建，但广播失败：{e}")
 
     async def handle_list_templates(self, event: AstrMessageEvent):
         """世界事件模板"""
-        if not event.message_obj.is_private:
+        if not self._is_private(event):
             yield event.plain_result("⚠️ 该指令仅限私聊使用")
             return
 
@@ -114,7 +156,7 @@ class AdminHandlers:
 
     async def handle_active_events(self, event: AstrMessageEvent):
         """查看世界事件（管理员查看所有活动事件）"""
-        if not event.message_obj.is_private:
+        if not self._is_private(event):
             yield event.plain_result("⚠️ 该指令仅限私聊使用")
             return
 
@@ -128,7 +170,7 @@ class AdminHandlers:
 
     async def handle_force_end_event(self, event: AstrMessageEvent):
         """结束世界事件 <事件ID>"""
-        if not event.message_obj.is_private:
+        if not self._is_private(event):
             yield event.plain_result("⚠️ 该指令仅限私聊使用")
             return
 
@@ -137,7 +179,7 @@ class AdminHandlers:
             yield event.plain_result("⚠️ 你没有管理员权限")
             return
 
-        args = event.message_str.strip().split()
+        args = self._command_args(event)
         if len(args) < 2:
             yield event.plain_result(
                 "用法：结束世界事件 <事件ID>\n"

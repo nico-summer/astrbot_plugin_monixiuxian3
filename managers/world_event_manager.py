@@ -11,6 +11,7 @@
 - 奖励含稀有炼丹材料（九转仙草 / 太古龙骨 / 灵髓精华 / 月华精粹），用于炼制还魂丹
 """
 
+import asyncio
 import json
 import random
 import time
@@ -20,11 +21,53 @@ from typing import Dict, List, Optional, Tuple
 from astrbot.api import logger
 
 from ..data.data_manager import DataBase
+from ..data.default_configs import DEFAULT_WORLD_EVENT_CONFIG
 from ..models import Player
 
 __all__ = ["WorldEventManager"]
 
 SEP = "━━━━━━━━━━━━━━━"
+
+
+# AstrBot 插件配置（_conf_schema.json）中的世界事件配置分组与键名映射
+PLUGIN_CONFIG_GROUP = "WORLD_EVENT"
+PLUGIN_KEY_MAP = {
+    "AUTO_GENERATE": "auto_generate",
+    "AUTO_INTERVAL_MINUTES": "auto_interval_minutes",
+    "SIGNUP_DURATION_SECONDS": "signup_duration_seconds",
+    "MIN_PARTICIPANTS": "min_participants",
+    "MAX_PARTICIPANTS": "max_participants",
+    "DEATH_PENALTY_REWARD_RATE": "death_penalty_reward_rate",
+    "BROADCAST_GROUPS": "broadcast_groups",
+    "ADMIN_USERS": "admin_users",
+}
+
+
+def _extract_plugin_world_event_config(plugin_config, defaults: dict) -> dict:
+    """从 AstrBot 插件配置面板提取世界事件配置（仅覆盖面板上暴露的项）
+
+    面板键名为大写（见 _conf_schema.json 的 WORLD_EVENT 分组），
+    内部键名为 snake_case；未在面板配置的项保持配置文件里的取值。
+    """
+    if plugin_config is None or not hasattr(plugin_config, "get"):
+        return {}
+
+    group = None
+    try:
+        group = plugin_config.get(PLUGIN_CONFIG_GROUP, None)
+    except Exception:
+        group = None
+    if not isinstance(group, dict):
+        return {}
+
+    values: dict = {}
+    for key, value in group.items():
+        if value is None:
+            continue
+        internal = PLUGIN_KEY_MAP.get(key, key)
+        if internal in defaults:
+            values[internal] = value
+    return values
 
 
 # 指令名（handlers / main.py / 管理器展示共用，避免多处硬编码漂移）
@@ -77,35 +120,42 @@ class WorldEventManager:
     # 事件模板配置（config/world_events.json），供 ItemRegistry / 装备系统解析
     CONFIG_FILE = Path(__file__).resolve().parents[1] / "config" / "world_events.json"
 
-    def __init__(self, db: DataBase, config_manager=None, storage_ring_manager=None, death_manager=None):
+    def __init__(
+        self,
+        db: DataBase,
+        config_manager=None,
+        storage_ring_manager=None,
+        death_manager=None,
+        plugin_config=None,
+    ):
         self.db = db
         self.config_manager = config_manager
         self.storage = storage_ring_manager
         self.death_manager = death_manager
+        # AstrBot 插件配置面板（DEATH_CONFIG 同级的 WORLD_EVENT 分组）
+        self._ai_generator = None  # AI 文案生成器（懒加载）
+        self.plugin_config = plugin_config
 
     # ==================== 配置 ====================
 
     def _config(self) -> dict:
-        """获取世界事件核心参数（配置缺失时回退默认值）"""
+        """获取世界事件核心参数
+
+        优先级：内置默认值 < 配置文件（config/world_events.json） < AstrBot 插件配置面板。
+        """
+        merged = dict(DEFAULT_WORLD_EVENT_CONFIG)
+
         getter = getattr(self.config_manager, "get_world_event_config", None)
         if callable(getter):
             try:
-                config = getter() or {}
-                if isinstance(config, dict) and config:
-                    return config
+                file_config = getter() or {}
+                if isinstance(file_config, dict) and file_config:
+                    merged.update({k: v for k, v in file_config.items() if v is not None})
             except Exception as e:
                 logger.warning(f"[世界事件] 读取配置失败，使用默认值: {e}")
-        return {
-            "auto_generate": True,
-            "auto_interval_minutes": [120, 240],
-            "max_participants": 10,
-            "min_participants": 1,
-            "signup_duration_seconds": 300,
-            "death_penalty_reward_rate": 0.2,
-            "auto_tier_weights": {"low_tier": 40, "mid_tier": 30, "high_tier": 20, "epic_tier": 10},
-            "admin_users": [],
-            "broadcast_groups": [],
-        }
+
+        merged.update(_extract_plugin_world_event_config(self.plugin_config, merged))
+        return merged
 
     def _templates(self) -> Dict[str, List[dict]]:
         """获取事件模板（按难度分组）"""
@@ -672,16 +722,23 @@ class WorldEventManager:
             f"参与 {len(participants)} 人，持续 {duration_minutes} 分钟"
         )
 
-        msg = (
-            f"⚔️ 世界事件开战！\n"
-            f"{SEP}\n"
-            f"🌟 【{name}】\n"
-            f"👥 参战道友：{len(participants)} 人\n"
-            f"⏰ 预计 {duration_minutes} 分钟后结算\n"
-            f"💀 预估死亡率：{int(self._to_float(event_data.get('base_death_rate'), 0) * 100)}%\n"
-            f"{SEP}\n"
-            f"🙏 祝各位道友旗开得胜，平安归来"
-        )
+        # 开场文案：AI 生成（未开启 AI 时使用固定模板）
+        intro = await self.generate_intro_text(event_data, len(participants))
+        lines = [
+            "⚔️ 世界事件开战！",
+            SEP,
+            f"🌟 【{name}】",
+        ]
+        if intro:
+            lines.append(intro)
+        lines.extend([
+            f"👥 参战道友：{len(participants)} 人",
+            f"⏰ 预计 {duration_minutes} 分钟后结算",
+            f"💀 预估死亡率：{int(self._to_float(event_data.get('base_death_rate'), 0) * 100)}%",
+            SEP,
+            "🙏 祝各位道友旗开得胜，平安归来",
+        ])
+        msg = "\n".join(lines)
         return True, msg, {"participants": len(participants), "duration_minutes": duration_minutes}
 
     async def complete_event(self, event_id) -> Tuple[bool, str, dict]:
@@ -781,7 +838,9 @@ class WorldEventManager:
             f"陨落 {len(results['fallen'])}"
         )
 
-        return True, self.format_result_message(results), results
+        # 总结文案：AI 生成（未开启 AI 时使用固定模板）
+        summary = await self.generate_summary_text(results)
+        return True, self.format_result_message(results, summary), results
 
     def _calc_death_rate(self, player: Player, base_death_rate: float, min_level: int, max_level: int) -> float:
         """计算玩家本次事件的死亡率（境界越低越危险）"""
@@ -924,6 +983,94 @@ class WorldEventManager:
         except Exception as e:
             logger.warning(f"[世界事件] 悬赏进度更新失败: {e}")
 
+
+    # ==================== AI 文案（可选，批次5） ====================
+
+    # 插件配置面板中的 AI 分组与键名映射
+    AI_PLUGIN_GROUP = "AI_GENERATOR"
+    AI_PLUGIN_KEY_MAP = {
+        "ENABLE_AI_INTRO": "enable_ai_intro",
+        "ENABLE_AI_SUMMARY": "enable_ai_summary",
+        "AI_API_KEY": "ai_api_key",
+        "AI_MODEL": "ai_model",
+        "AI_BASE_URL": "ai_base_url",
+        "FIXED_FALLBACK": "fixed_fallback",
+    }
+
+    def _ai_config(self) -> dict:
+        """AI 文案配置：config/world_events.json 的 ai_config < AstrBot 插件配置面板 AI_GENERATOR"""
+        config = dict(self._config().get("ai_config") or {})
+
+        group = self._plugin_option(self.AI_PLUGIN_GROUP)
+        if isinstance(group, dict):
+            for key, value in group.items():
+                if value is None:
+                    continue
+                internal = self.AI_PLUGIN_KEY_MAP.get(key, key)
+                config[internal] = value
+        return config
+
+    def _get_ai_generator(self):
+        """懒加载 AI 生成器（配置变更后重载插件即可生效）"""
+        if self._ai_generator is None:
+            try:
+                from ..utils.ai_generator import AIGenerator
+
+                self._ai_generator = AIGenerator(self._ai_config(), self.plugin_config)
+            except Exception as e:
+                logger.warning(f"[世界事件] AI 生成器初始化失败，将使用固定文案: {e}")
+                self._ai_generator = False  # 标记为不可用，避免反复重试
+        return self._ai_generator or None
+
+    async def generate_intro_text(self, event_data: dict, participants: int = 0) -> str:
+        """生成事件开场文案（AI 关闭 / 失败时回退固定模板，最终返回空串表示不加文案）"""
+        generator = self._get_ai_generator()
+        if generator is None:
+            return ""
+        try:
+            return await asyncio.to_thread(
+                generator.generate_event_intro,
+                event_data.get("name", "世界事件"),
+                event_data.get("tier", ""),
+                participants,
+                self._get_level_name(self._to_int(event_data.get("min_level"), 0)),
+            ) or ""
+        except Exception as e:
+            logger.warning(f"[世界事件] AI 开场文案生成失败: {e}")
+            return ""
+
+    async def generate_summary_text(self, results: dict) -> str:
+        """生成事件总结文案（AI 关闭 / 失败时回退固定模板）"""
+        generator = self._get_ai_generator()
+        if generator is None:
+            return ""
+
+        survivors = results.get("survivors") or []
+        deaths = results.get("deaths") or []
+        fallen = results.get("fallen") or []
+
+
+        participants = [item.get("name", "") for item in (survivors + deaths + fallen)]
+
+        drop_counter: Dict[str, int] = {}
+        for rewards in (results.get("rewards") or {}).values():
+            for item in rewards.get("items", []):
+                drop_counter[item] = drop_counter.get(item, 0) + 1
+        rewards_summary = "、".join(f"{name}×{count}" for name, count in drop_counter.items())
+
+        try:
+            return await asyncio.to_thread(
+                generator.generate_event_summary,
+                results.get("name", "世界事件"),
+                participants,
+                deaths,
+                survivors,
+                rewards_summary,
+            ) or ""
+        except Exception as e:
+            logger.warning(f"[世界事件] AI 总结文案生成失败: {e}")
+            return ""
+
     # ==================== 定时推进 / 自动生成 ====================
 
     async def process_pending_events(self) -> List[Tuple[str, str]]:
@@ -977,39 +1124,52 @@ class WorldEventManager:
             return False, "⚠️ 所有目标群均已有进行中的世界事件，本次跳过", []
 
         name = template.get("name", "世界事件")
-        return True, (
-            f"🌟 天地异动，世界事件【{name}】开启！\n"
-            f"{SEP}\n"
-            f"📍 目标群：{len(created)} 个\n"
-            f"⏰ 报名时间有限，速速前往参与"
-        ), created
+        intro = await self.generate_intro_text(
+            {
+                "name": name,
+                "tier": template.get("tier", ""),
+                "min_level": template.get("min_level", 0),
+            },
+            0,
+        )
+        lines = [
+            f"🌟 天地异动，世界事件【{name}】开启！",
+            SEP,
+            intro or f"📜 {template.get('description', '')}",
+            SEP,
+            f"⚔️ 难度：{template.get('tier', '未知')}"
+            f"（推荐 {self._get_level_name(self._to_int(template.get('min_level'), 0))}+）",
+            f"⏰ 报名时间有限，发送「{CMD_JOIN_WORLD_EVENT}」速速前往参与",
+        ]
+        return True, "\n".join(lines), created
 
     # ==================== 展示 ====================
 
-    def format_event_broadcast(self, event: dict, participants: int = 0) -> str:
-        """事件报名广播文案"""
+    def format_event_broadcast(self, event: dict, participants: int = 0, intro: str = "") -> str:
+        """事件报名广播文案（``intro`` 为可选的 AI 开场描述）"""
         event_data = self.parse_event_data(event.get("event_data"))
         max_participants = max(1, self._to_int(self._config().get("max_participants"), 10))
         remaining = max(0, self._to_int(event.get("signup_end_time"), 0) - int(time.time()))
         admin_tag = "🎯 【管理员特别活动】\n" if event_data.get("admin_created") else ""
 
-        return (
-            f"{SEP} 世界事件 {SEP}\n"
-            f"{admin_tag}"
-            f"🌟 【{event_data.get('name', '世界事件')}】\n"
-            f"📜 {event_data.get('description', '')}\n"
-            f"{SEP}\n"
-            f"⚔️ 难度：{event_data.get('tier', '未知')}\n"
+        lines = [
+            f"{SEP} 世界事件 {SEP}",
+            admin_tag.rstrip("\n") if admin_tag else None,
+            f"🌟 【{event_data.get('name', '世界事件')}】",
+            intro or f"📜 {event_data.get('description', '')}",
+            SEP,
+            f"⚔️ 难度：{event_data.get('tier', '未知')}",
             f"📊 推荐境界：{self._get_level_name(self._to_int(event_data.get('min_level'), 0))}"
-            f" - {self._get_level_name(self._to_int(event_data.get('max_level'), 0))}\n"
-            f"💀 预估死亡率：{int(self._to_float(event_data.get('base_death_rate'), 0) * 100)}%\n"
-            f"🎁 奖励倍率：{self._to_float(event_data.get('reward_multiplier'), 1.0)}x\n"
-            f"⏰ 报名剩余：{self.format_duration(remaining)}\n"
-            f"{SEP}\n"
-            f"发送「{CMD_JOIN_WORLD_EVENT}」参与战斗！\n"
-            f"当前报名人数：{participants}/{max_participants}\n"
-            f"{SEP}"
-        )
+            f" - {self._get_level_name(self._to_int(event_data.get('max_level'), 0))}",
+            f"💀 预估死亡率：{int(self._to_float(event_data.get('base_death_rate'), 0) * 100)}%",
+            f"🎁 奖励倍率：{self._to_float(event_data.get('reward_multiplier'), 1.0)}x",
+            f"⏰ 报名剩余：{self.format_duration(remaining)}",
+            SEP,
+            f"发送「{CMD_JOIN_WORLD_EVENT}」参与战斗！",
+            f"当前报名人数：{participants}/{max_participants}",
+            SEP,
+        ]
+        return "\n".join(line for line in lines if line)
 
     def format_event_progress(self, event: dict) -> str:
         """事件进行中的状态文案"""
@@ -1023,7 +1183,7 @@ class WorldEventManager:
             f"🎁 奖励结算后公布"
         )
 
-    def format_result_message(self, results: dict) -> str:
+    def format_result_message(self, results: dict, summary: str = "") -> str:
         """事件结算广播文案"""
         lines = [
             f"{SEP} 事件结算 {SEP}",
@@ -1036,6 +1196,10 @@ class WorldEventManager:
         deaths = results.get("deaths") or []
         fallen = results.get("fallen") or []
 
+
+        if summary:
+            lines.append(summary)
+            lines.append(SEP)
         if survivors:
             names = "、".join(item["name"] for item in survivors)
             lines.append(f"✅ 生还（全额奖励）：{names}")
@@ -1186,21 +1350,50 @@ class WorldEventManager:
 
     # ==================== 管理员功能（批次5） ====================
 
-    def is_admin(self, user_id: str) -> bool:
-        """检查用户是否为管理员（优先从AstrBot配置读取）"""
-        # 优先从 AstrBot 配置读取
-        if self.config_manager and hasattr(self.config_manager, 'get'):
-            try:
-                astrbot_admins = self.config_manager.get("world_event_admin_users")
-                if astrbot_admins is not None:
-                    admin_list = [str(a) for a in (astrbot_admins if isinstance(astrbot_admins, list) else [])]
-                    return str(user_id) in admin_list
-            except Exception as e:
-                logger.warning(f"从 AstrBot 配置读取管理员列表失败: {e}")
+    # ==================== 管理员鉴权 ====================
 
-        # 从文件配置读取
-        admin_list = self._config().get("admin_users", [])
-        return str(user_id) in [str(uid) for uid in admin_list]
+    def _plugin_option(self, key: str):
+        """读取 AstrBot 插件配置的顶层键（兼容旧版写法）"""
+        if self.plugin_config is None or not hasattr(self.plugin_config, "get"):
+            return None
+        try:
+            return self.plugin_config.get(key, None)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _as_str_list(value) -> List[str]:
+        """把配置值规整为字符串列表"""
+        if value is None:
+            return []
+        if isinstance(value, (str, int)):
+            value = [value]
+        if not isinstance(value, (list, tuple, set)):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    def get_admin_users(self) -> List[str]:
+        """获取世界事件管理员列表
+
+        优先级：插件配置面板 WORLD_EVENT.ADMIN_USERS
+                > 插件配置顶层 world_event_admin_users（旧写法）
+                > config/world_events.json 的 admin_users
+        """
+        admins = self._as_str_list(self._config().get("admin_users"))
+        if admins:
+            return admins
+        return self._as_str_list(self._plugin_option("world_event_admin_users"))
+
+    def get_broadcast_groups(self) -> List[str]:
+        """获取事件广播/目标群列表（同上优先级）"""
+        groups = self._as_str_list(self._config().get("broadcast_groups"))
+        if groups:
+            return groups
+        return self._as_str_list(self._plugin_option("world_event_broadcast_groups"))
+
+    def is_admin(self, user_id: str) -> bool:
+        """检查用户是否为世界事件管理员"""
+        return str(user_id) in self.get_admin_users()
 
     async def create_admin_event(
         self,
@@ -1227,21 +1420,9 @@ class WorldEventManager:
         if not self.is_admin(admin_id):
             return False, "⚠️ 你没有管理员权限", None
 
-        # 优先从 AstrBot 配置读取允许的群号列表
-        allowed_groups = []
-        if self.config_manager and hasattr(self.config_manager, 'get'):
-            try:
-                astrbot_groups = self.config_manager.get("world_event_broadcast_groups")
-                if astrbot_groups is not None:
-                    allowed_groups = [str(g) for g in (astrbot_groups if isinstance(astrbot_groups, list) else [])]
-            except Exception as e:
-                logger.warning(f"从 AstrBot 配置读取群号列表失败: {e}")
-
-        # 如果 AstrBot 配置没有，从文件配置读取
-        if not allowed_groups:
-            allowed_groups = self._config().get("broadcast_groups", [])
-
-        if allowed_groups and str(group_id) not in [str(g) for g in allowed_groups]:
+        # 允许的群号：插件配置面板 > 插件顶层旧键 > config/world_events.json
+        allowed_groups = self.get_broadcast_groups()
+        if allowed_groups and str(group_id) not in allowed_groups:
             return False, f"❌ 群号 {group_id} 不在允许列表中", None
 
         tier_map = {

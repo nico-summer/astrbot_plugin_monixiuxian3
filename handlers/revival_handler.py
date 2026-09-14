@@ -65,24 +65,39 @@ class RevivalHandler:
             return default
 
     def _get_merged_config(self) -> dict:
-        """合并配置：ConfigManager（文件）> 插件配置 > 内置默认值"""
+        """合并死亡配置（优先级从低到高）
+
+        1. 内置默认值
+        2. config/death_config.json（经 resolve_death_config 解析，含 AstrBot 插件配置面板）
+
+        注意：main.py 初始化时会把「文件 + 插件配置」合并后的扁平字典通过
+        ``config`` 传入，因此显式传入的值优先级最高。
+        """
         merged = DEFAULT_DEATH_CONFIG.copy()
 
-        # 从插件配置中读取
-        if self.config:
-            merged.update(self.config.get("death_config", {}))
+        passed = self.config if isinstance(self.config, dict) else {}
+        if isinstance(passed.get("death_config"), dict):
+            passed = passed["death_config"]
+        for key in DEFAULT_DEATH_CONFIG:
+            value = passed.get(key)
+            if value is not None:
+                merged[key] = value
 
-        # 从 ConfigManager 中读取（优先级最高）
+        # 兜底：未显式传入时从配置管理器 / 插件配置解析
         if self.config_manager:
             try:
-                death_cfg = self.config_manager.get("death_config", {})
-                if death_cfg:
-                    merged.update(death_cfg)
+                from ..core.death_manager import resolve_death_config
+
+                resolved = resolve_death_config(self.config_manager)
+                for key in DEFAULT_DEATH_CONFIG:
+                    if merged.get(key) != DEFAULT_DEATH_CONFIG[key]:
+                        continue  # 显式传入的值优先
+                    if resolved.get(key) is not None:
+                        merged[key] = resolved[key]
             except Exception as e:
-                logger.warning(f"读取 death_config 失败: {e}")
+                logger.warning(f"读取死亡系统配置失败，使用默认值: {e}")
 
         return merged
-
     def _resolve_death_config(self) -> dict:
         """合并配置：ConfigManager（文件）> 插件配置 > 内置默认值"""
         return self._get_merged_config()

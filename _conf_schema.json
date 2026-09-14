@@ -317,6 +317,132 @@
       }
     }
   },
+  "DEATH_CONFIG": {
+    "description": "死亡与复活配置（突破失败 / 世界事件阵亡）",
+    "type": "object",
+    "items": {
+      "SOUL_REVIVAL_HOURS": {
+        "description": "元神自然复活所需小时数",
+        "type": "float",
+        "default": 24,
+        "hint": "金丹期及以上死亡后进入元神状态，等待该时长后可发送「自然复活」；超时 4 倍仍未复活则修为归零并强制复活。"
+      },
+      "SOUL_EXP_LOSS_RATE": {
+        "description": "自然复活永久损失修为比例",
+        "type": "float",
+        "default": 0.05,
+        "hint": "0.05 表示自然复活永久损失 5% 修为；使用还魂丹复活无任何损失。"
+      },
+      "REBIRTH_EXP_KEEP_RATE": {
+        "description": "「劫后重生」保留修为比例",
+        "type": "float",
+        "default": 0.7,
+        "hint": "练气期-筑基期首次死亡触发劫后重生：境界倒退 1 级并保留该比例修为（默认 70%）；仅一次机会，第二次死亡彻底陨落删号。"
+      },
+      "SOUL_EXP_DECAY_PER_HOUR": {
+        "description": "元神状态每小时修为流失比例",
+        "type": "float",
+        "default": 0.01,
+        "hint": "元神状态期间每小时流失的修为比例（默认 1%/小时）。"
+      }
+    }
+  },
+  "WORLD_EVENT": {
+    "description": "世界事件配置（群内多人协作玩法，替代原历练系统）",
+    "type": "object",
+    "items": {
+      "AUTO_GENERATE": {
+        "description": "自动生成世界事件",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后会定时自动在群内开启世界事件并广播；事件难度、掉落与文案细节见 config/world_events.json。"
+      },
+      "AUTO_INTERVAL_MINUTES": {
+        "description": "自动生成间隔（分钟）",
+        "type": "list",
+        "default": [120, 240],
+        "hint": "两个值构成区间，每次在该区间内随机取一个间隔。例如 [120, 240] 表示 2-4 小时一场。"
+      },
+      "SIGNUP_DURATION_SECONDS": {
+        "description": "报名时长（秒）",
+        "type": "int",
+        "default": 300,
+        "hint": "事件广播后玩家可报名的时间，截止后自动开战。默认 300 秒（5 分钟）。"
+      },
+      "MIN_PARTICIPANTS": {
+        "description": "最少报名人数",
+        "type": "int",
+        "default": 1,
+        "hint": "报名人数不足该值时事件自动取消。"
+      },
+      "MAX_PARTICIPANTS": {
+        "description": "报名人数上限",
+        "type": "int",
+        "default": 10,
+        "hint": "单场事件最多参与的玩家数量。"
+      },
+      "DEATH_PENALTY_REWARD_RATE": {
+        "description": "阵亡者奖励保留比例",
+        "type": "float",
+        "default": 0.2,
+        "hint": "事件中阵亡（未彻底陨落）的玩家可获得奖励的比例，默认 0.2（20%）；幸存者始终拿全额奖励。"
+      },
+      "BROADCAST_GROUPS": {
+        "description": "事件广播群号列表",
+        "type": "list",
+        "default": [],
+        "hint": "事件生成与结果广播发送到这些群；留空则使用「访问控制 - 白名单群号列表」。"
+      },
+      "ADMIN_USERS": {
+        "description": "世界事件管理员名单",
+        "type": "list",
+        "default": [],
+        "hint": "可以私聊机器人手动创建/结束世界事件的用户ID（字符串），留空表示无人可手动操作。"
+      }
+    }
+  },
+  "AI_GENERATOR": {
+    "description": "AI 文案生成（可选，兼容 OpenAI 格式的任意服务）",
+    "type": "object",
+    "items": {
+      "ENABLE_AI_INTRO": {
+        "description": "启用 AI 事件开场文案",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后世界事件开场描述由 AI 生成（失败自动回退固定模板），需要同时填写 API Key 与 Base URL。"
+      },
+      "ENABLE_AI_SUMMARY": {
+        "description": "启用 AI 事件总结文案",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后事件结算会编造一段战况总结，增强代入感；失败自动回退固定模板。"
+      },
+      "AI_API_KEY": {
+        "description": "AI API Key",
+        "type": "string",
+        "default": "",
+        "hint": "各服务商的密钥（OpenAI / DeepSeek / 硅基流动 / OpenRouter 等）。留空则使用固定模板。"
+      },
+      "AI_BASE_URL": {
+        "description": "AI Base URL",
+        "type": "string",
+        "default": "",
+        "hint": "例如 https://api.openai.com/v1 、https://api.deepseek.com 、https://api.siliconflow.cn/v1 。留空则使用固定模板。"
+      },
+      "AI_MODEL": {
+        "description": "AI 模型名称",
+        "type": "string",
+        "default": "gpt-3.5-turbo",
+        "hint": "例如 gpt-3.5-turbo / deepseek-chat / Qwen/Qwen2.5-7B-Instruct 。"
+      },
+      "FIXED_FALLBACK": {
+        "description": "AI 失败时使用固定模板",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后 AI 调用失败将不追加任何文案（仅保留系统默认信息）。"
+      }
+    }
+  },
   "FILES": {
     "description": "文件路径配置",
     "type": "object",

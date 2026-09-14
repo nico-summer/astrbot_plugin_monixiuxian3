@@ -318,6 +318,103 @@ class DataBase:
         await self.conn.execute("DELETE FROM players WHERE user_id = ?", (user_id,))
         await self.conn.commit()
 
+    # ===== 世界事件（批次4 / 批次5）：事件查询 =====
+
+
+    async def get_world_event(self, event_id) -> Optional[dict]:
+        """按ID查询单个世界事件（``event_data`` 解析为 dict）"""
+        try:
+            event_id = int(event_id)
+        except (TypeError, ValueError):
+            return None
+
+        try:
+            async with self.conn.execute(
+                "SELECT * FROM world_events WHERE event_id = ?", (event_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+        except Exception as e:
+            logger.error(f"[世界事件] 查询事件失败: {e}")
+            return None
+
+        if not row:
+            return None
+        event = dict(row)
+        event_data = event.get("event_data")
+        if isinstance(event_data, str):
+            try:
+                event["event_data"] = json.loads(event_data)
+            except Exception:
+                event["event_data"] = {}
+        return event
+
+    async def cancel_world_event(self, event_id) -> bool:
+        """把事件标记为已取消（管理员强制结束 / 人数不足）"""
+        try:
+            event_id = int(event_id)
+        except (TypeError, ValueError):
+            return False
+
+        try:
+            cursor = await self.conn.execute(
+                "UPDATE world_events SET status = 'cancelled', complete_time = ? "
+                "WHERE event_id = ? AND status IN ('signup', 'in_progress')",
+                (int(time.time()), event_id),
+            )
+            await self.conn.commit()
+            return bool(cursor.rowcount)
+        except Exception as e:
+            logger.error(f"[世界事件] 取消事件失败: {e}")
+            return False
+
+    async def list_world_events(
+        self, status_filter: Optional[List[str]] = None, limit: int = 20
+    ) -> List[dict]:
+        """查询世界事件列表（管理员「查看世界事件」使用）
+
+        Args:
+            status_filter: 需要包含的状态列表（如 ["signup", "in_progress"]），为空表示全部
+            limit: 最多返回条数
+
+        Returns:
+            事件字典列表，``event_data`` 已解析为 dict
+        """
+        try:
+            limit = max(1, int(limit or 20))
+        except (TypeError, ValueError):
+            limit = 20
+
+        sql = "SELECT * FROM world_events"
+        params: List = []
+        if status_filter:
+            placeholders = ", ".join("?" for _ in status_filter)
+            sql += f" WHERE status IN ({placeholders})"
+            params.extend([str(status) for status in status_filter])
+        sql += " ORDER BY create_time DESC, event_id DESC LIMIT ?"
+        params.append(limit)
+
+        try:
+            async with self.conn.execute(sql, tuple(params)) as cursor:
+                rows = await cursor.fetchall()
+        except Exception as e:
+            logger.error(f"[世界事件] 查询事件列表失败: {e}")
+            return []
+
+        events: List[dict] = []
+        for row in rows:
+            try:
+                event = dict(row)
+            except Exception:
+                continue
+            event_data = event.get("event_data")
+            if isinstance(event_data, str):
+                try:
+                    event["event_data"] = json.loads(event_data)
+                except Exception:
+                    event["event_data"] = {}
+            events.append(event)
+        return events
+
     # ===== 炼丹系统（批次2）：配方学习 / 玩家称号 =====
 
     async def has_learned_recipe(self, user_id: str, recipe_id: int) -> bool:

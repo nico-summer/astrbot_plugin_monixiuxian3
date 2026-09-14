@@ -1,13 +1,18 @@
 # core/death_manager.py
 """死亡 / 陨落统一处理（批次1 死亡机制，批次4 世界事件复用）
 
-规则（参数见 config/death_config.json）：
+规则（参数可在两处调整）：
+1. ``config/death_config.json``（随插件分发的默认配置文件）
+2. AstrBot 插件配置面板「死亡与复活配置」（``_conf_schema.json`` 的 DEATH_CONFIG 分组）
+
+优先级：内置默认值 < 配置文件 < 插件配置面板。
+
 - 练气期-筑基期（境界 < 13）：首次死亡触发「劫后重生」——境界倒退 1 级、
   保留部分修为、状态清空；第二次死亡彻底陨落（删除角色及关联数据）
 - 金丹期及以上（境界 >= 13）：死亡进入【元神状态】，不会删号，等待复活
 
-批次1 的「突破走火入魔」与批次4 的「世界事件阵亡」共用这里的逻辑，
-避免两套死亡规则各自漂移。
+批次1 的「突破走火入魔」、批次4 的「世界事件阵亡」与复活系统共用这里的配置解析，
+避免多套死亡参数各自漂移。
 """
 
 import time
@@ -25,18 +30,102 @@ __all__ = [
     "DeathOutcome",
     "SOUL_STATE_LEVEL_INDEX",
     "DEFAULT_DEATH_CONFIG",
+    "resolve_death_config",
 ]
 
 # 金丹期及以上（level_index >= 13）死亡进入元神状态
 SOUL_STATE_LEVEL_INDEX = 13
 
-# 内核默认值（与 config/death_config.json 保持一致）
+# 内核默认值（与 config/death_config.json、_conf_schema.json 保持一致）
 DEFAULT_DEATH_CONFIG = {
     "soul_revival_hours": 24,
     "soul_exp_loss_rate": 0.05,
     "rebirth_exp_keep_rate": 0.7,
     "soul_exp_decay_per_hour": 0.01,
 }
+
+# AstrBot 插件配置（_conf_schema.json）中的死亡配置分组名
+PLUGIN_CONFIG_GROUP = "DEATH_CONFIG"
+# 插件配置面板键名 -> 内部配置键名（面板沿用插件配置的大写风格）
+PLUGIN_KEY_MAP = {
+    "SOUL_REVIVAL_HOURS": "soul_revival_hours",
+    "SOUL_EXP_LOSS_RATE": "soul_exp_loss_rate",
+    "REBIRTH_EXP_KEEP_RATE": "rebirth_exp_keep_rate",
+    "SOUL_EXP_DECAY_PER_HOUR": "soul_exp_decay_per_hour",
+}
+# 兼容旧写法：顶层直接放 death_config
+LEGACY_PLUGIN_CONFIG_KEY = "death_config"
+
+
+def _extract_plugin_death_config(plugin_config) -> dict:
+    """从 AstrBot 插件配置对象中提取死亡配置（兼容多种存放方式）
+
+    支持：
+    1. 插件配置面板分组 ``DEATH_CONFIG``（推荐，见 _conf_schema.json，键名为大写）
+    2. 顶层 ``death_config``（旧写法，键名为 snake_case）
+    3. 配置项直接写在插件配置顶层（大写或 snake_case 均可）
+    """
+    if plugin_config is None or not hasattr(plugin_config, "get"):
+        return {}
+
+    values: dict = {}
+
+    legacy = None
+    try:
+        legacy = plugin_config.get(LEGACY_PLUGIN_CONFIG_KEY, None)
+    except Exception:
+        legacy = None
+    if isinstance(legacy, dict):
+        for key, value in legacy.items():
+            internal = PLUGIN_KEY_MAP.get(key, key)
+            if internal in DEFAULT_DEATH_CONFIG and value is not None:
+                values[internal] = value
+
+    group = None
+    try:
+        group = plugin_config.get(PLUGIN_CONFIG_GROUP, None)
+    except Exception:
+        group = None
+    if not isinstance(group, dict):
+        # 兼容直接把配置项写在插件配置顶层的旧配置
+        group = plugin_config
+
+    for key, value in (group or {}).items():
+        if value is None:
+            continue
+        internal = PLUGIN_KEY_MAP.get(key, key)
+        if internal in DEFAULT_DEATH_CONFIG:
+            values[internal] = value
+
+    return values
+
+
+def resolve_death_config(config_manager=None, plugin_config=None) -> dict:
+    """合并死亡系统配置，返回扁平字典（优先级从低到高）
+
+    1. 内置默认值 ``DEFAULT_DEATH_CONFIG``
+    2. ``config/death_config.json``
+    3. AstrBot 插件配置面板 ``DEATH_CONFIG``（后台可视化调整，优先级最高）
+
+    突破死亡、世界事件阵亡、复活系统都通过本函数读取配置，
+    保证「插件配置面板 / 配置文件」两条路径行为一致。
+    """
+    resolved = dict(DEFAULT_DEATH_CONFIG)
+
+    getter = getattr(config_manager, "get_death_config", None)
+    if callable(getter):
+        try:
+            file_config = getter() or {}
+            if isinstance(file_config, dict):
+                resolved.update({k: v for k, v in file_config.items() if v is not None})
+        except Exception as e:
+            logger.warning(f"读取死亡系统配置失败，使用默认值: {e}")
+
+    plugin_values = _extract_plugin_death_config(plugin_config)
+    if plugin_values:
+        resolved.update(plugin_values)
+
+    return resolved
 
 
 @dataclass
@@ -88,26 +177,8 @@ class DeathManager:
     # ===== 配置 =====
 
     def get_death_config(self) -> dict:
-        """获取死亡系统配置（配置管理器 -> 插件配置 -> 内置默认值逐级回退）"""
-        config = dict(DEFAULT_DEATH_CONFIG)
-
-        getter = getattr(self.config_manager, "get_death_config", None)
-        if callable(getter):
-            try:
-                file_config = getter() or {}
-                if isinstance(file_config, dict):
-                    config.update({k: v for k, v in file_config.items() if v is not None})
-            except Exception as e:
-                logger.warning(f"读取死亡系统配置失败，使用默认值: {e}")
-
-        try:
-            plugin_config = self.config.get("death_config", {}) if hasattr(self.config, "get") else {}
-        except Exception:
-            plugin_config = {}
-        if isinstance(plugin_config, dict):
-            config.update({k: v for k, v in plugin_config.items() if v is not None})
-
-        return config
+        """获取死亡系统配置（内置默认值 < death_config.json < AstrBot 插件配置）"""
+        return resolve_death_config(self.config_manager, self.config)
 
     @staticmethod
     def _to_float(value, default: float) -> float:

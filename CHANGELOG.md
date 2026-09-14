@@ -1,5 +1,40 @@
 # 版本更新日志
 
+## v3.8.1 (2026-09-12) - 死亡惩罚/AI 配置接入 AstrBot 面板 + 批次5 修复
+
+### ⚙️ 新功能：死亡惩罚与世界事件参数可在 AstrBot 后台配置
+
+- 插件配置面板新增分组（保存后重载插件生效）：
+  - **死亡与复活配置**：`SOUL_REVIVAL_HOURS`（元神自然复活小时数）、`SOUL_EXP_LOSS_RATE`
+    （自然复活永久损失修为比例）、`REBIRTH_EXP_KEEP_RATE`（劫后重生保留修为比例）、
+    `SOUL_EXP_DECAY_PER_HOUR`（元神每小时修为流失比例）
+  - **世界事件配置**：`AUTO_GENERATE`、`AUTO_INTERVAL_MINUTES`、`SIGNUP_DURATION_SECONDS`、
+    `MIN_PARTICIPANTS`、`MAX_PARTICIPANTS`、`DEATH_PENALTY_REWARD_RATE`（阵亡者奖励保留比例）、
+    `BROADCAST_GROUPS`、`ADMIN_USERS`
+  - **AI 文案生成**：`ENABLE_AI_INTRO`、`ENABLE_AI_SUMMARY`、`AI_API_KEY`、`AI_BASE_URL`、
+    `AI_MODEL`、`FIXED_FALLBACK`
+- 配置优先级统一为：**插件配置面板 > config/*.json > 内置默认值**
+
+### 🐛 修复：配置读取与批次5 功能缺陷
+
+| 问题 | 说明 |
+|------|------|
+| 死亡配置面板不生效 | 新增 `core/death_manager.resolve_death_config()` 统一解析（默认值 → `death_config.json` → 插件面板），突破、世界事件阵亡、复活系统均改为走该入口 |
+| `RevivalHandler` 读取配置报错 | 原实现调用不存在的 `config_manager.get(...)`，异常被吞掉导致**一直使用默认值**（配置文件与面板都被忽略），现已修复 |
+| 管理员权限无法生效 | `is_admin()` / 群号白名单同样调用了不存在的 `config_manager.get(...)`，现改为读取合并后的配置（面板 `ADMIN_USERS` / `BROADCAST_GROUPS`，兼容旧的顶层 `world_event_admin_users`） |
+| `查看世界事件` 报错 | `DataBase` 缺少 `list_world_events()`，已补齐；同时补充 `get_world_event()` / `cancel_world_event()`（`结束世界事件` 依赖） |
+| 管理员创建的事件没广播 | `创建世界事件` 成功后现在会立即把事件广播到目标群（含 AI 开场文案），此前只有一句「实际广播由定时任务处理」的空实现 |
+| 私聊判断可能报错 | `event.message_obj.is_private` 改为兼容实现（优先用 `get_group_id()` 判断，失败再回退到 `message_obj.is_private`） |
+| AI 文案从未生效 | `utils/ai_generator.py` 此前只是独立文件、没有任何调用点；现已接入事件开场与结算总结，并改为读取插件面板 `AI_GENERATOR` 分组（同时改用 AstrBot logger） |
+
+### 🤖 AI 文案接入细节
+
+- 事件开战 / 自动生成广播：调用 `generate_event_intro()`，失败或未启用时回退固定模板
+- 事件结算广播：调用 `generate_event_summary()`，生成含阵亡原因的战况总结
+- AI 调用通过 `asyncio.to_thread` 执行，避免阻塞事件循环；`requests` 已加入 `requirements.txt`
+- 兼容 OpenAI 格式的任意服务（OpenAI / DeepSeek / 硅基流动 / OpenRouter 等）
+
+
 ## v3.8.0 (2026-09-11) - 管理员功能与AI集成（批次5）
 
 ### 🛠️ 管理员指令（仅私聊bot）

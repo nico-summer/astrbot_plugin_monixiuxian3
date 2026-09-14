@@ -275,7 +275,7 @@ class XiuXianPlugin(Star):
         self.storage_ring_handler = StorageRingHandler(self.db, self.config_manager, self.item_registry)
         
         # 初始化核心管理器
-        from .core import StorageRingManager, EquipmentManager, DeathManager
+        from .core import StorageRingManager, EquipmentManager, DeathManager, resolve_death_config
         self.storage_ring_mgr = StorageRingManager(self.db, self.config_manager)
         self.equipment_mgr = EquipmentManager(self.db, self.config_manager, self.storage_ring_mgr)
 
@@ -286,7 +286,7 @@ class XiuXianPlugin(Star):
         self.rank_mgr = RankingManager(self.db, self.combat_mgr, self.config_manager)
         self.death_mgr = DeathManager(self.db, self.config_manager, self.config)
         self.world_event_mgr = WorldEventManager(
-            self.db, self.config_manager, self.storage_ring_mgr, self.death_mgr
+            self.db, self.config_manager, self.storage_ring_mgr, self.death_mgr, plugin_config=self.config
         )
         self.alchemy_mgr = AlchemyManager(self.db, self.config_manager, self.storage_ring_mgr)
         # 委托炼丹（批次3）：炼丹师职业 + 玩家间委托炼丹
@@ -304,7 +304,9 @@ class XiuXianPlugin(Star):
         self.world_event_handlers = WorldEventHandlers(self.db, self.world_event_mgr)
 
         # 管理员处理器（批次5）
-        self.admin_handlers = AdminHandlers(self.world_event_mgr)
+        self.admin_handlers = AdminHandlers(
+            self.world_event_mgr, broadcaster=self._broadcast_world_event
+        )
         self.alchemy_handlers = AlchemyHandlers(self.db, self.alchemy_mgr)
         self.commission_handlers = CommissionHandlers(
             self.db, self.commission_mgr, self.alchemy_mgr
@@ -343,7 +345,8 @@ class XiuXianPlugin(Star):
         self.team_handlers = TeamHandlers(self.db, self.team_mgr, self.rift_mgr)
 
         # 死亡机制（批次1）：复活系统
-        self.death_config = self.config_manager.get_death_config()
+        # 死亡系统配置：内置默认值 < config/death_config.json < AstrBot 插件配置面板
+        self.death_config = resolve_death_config(self.config_manager, self.config)
         self.revival_handler = RevivalHandler(
             self.db, config=self.death_config, config_manager=self.config_manager
         )
@@ -911,9 +914,8 @@ class XiuXianPlugin(Star):
     WORLD_EVENT_TICK_SECONDS = 30
 
     def _world_event_target_groups(self) -> list:
-        """世界事件的目标群：优先 broadcast_groups，其次白名单群"""
-        config = self.world_event_mgr._config()
-        groups = [str(g).strip() for g in (config.get("broadcast_groups") or []) if str(g).strip()]
+        """世界事件的目标群：优先插件配置/文件里的 broadcast_groups，其次白名单群"""
+        groups = list(self.world_event_mgr.get_broadcast_groups())
         if not groups:
             groups = [str(g) for g in self.whitelist_groups]
 

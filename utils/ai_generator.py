@@ -16,10 +16,9 @@ AI文案生成器
 AI调用失败时自动降级为固定模板。
 """
 
-import logging
+from astrbot.api import logger
 from typing import Optional
 
-logger = logging.getLogger("xiuxian")
 
 # 尝试导入 requests，如果失败则禁用AI功能
 try:
@@ -36,7 +35,7 @@ class AIGenerator:
     支持 OpenAI 格式的通用 API，失败时降级为固定模板。
     """
 
-    def __init__(self, config: dict, config_manager=None):
+    def __init__(self, config: dict, plugin_config=None):
         """
         初始化AI生成器
 
@@ -50,7 +49,7 @@ class AIGenerator:
                 - world_event_ai_base_url: API地址
         """
         self.config = config or {}
-        self.config_manager = config_manager
+        self.plugin_config = plugin_config
 
         # 合并配置：优先使用 AstrBot 配置
         merged_config = self._get_merged_config()
@@ -75,48 +74,67 @@ class AIGenerator:
             if not self.base_url:
                 logger.warning("AI功能已启用但未配置base_url，将使用固定模板")
 
+    # 插件配置面板分组与键名映射（_conf_schema.json 的 AI_GENERATOR 分组）
+    PLUGIN_CONFIG_GROUP = "AI_GENERATOR"
+    PLUGIN_KEY_MAP = {
+        "ENABLE_AI_INTRO": "enable_ai_intro",
+        "ENABLE_AI_SUMMARY": "enable_ai_summary",
+        "AI_API_KEY": "ai_api_key",
+        "AI_MODEL": "ai_model",
+        "AI_BASE_URL": "ai_base_url",
+        "FIXED_FALLBACK": "fixed_fallback",
+        "AI_PROVIDER": "ai_provider",
+    }
+
     def _get_merged_config(self) -> dict:
-        """合并配置：AstrBot配置 > 文件配置 > 默认值"""
+        """合并配置：默认值 < world_events.json 的 ai_config < AstrBot 插件配置面板"""
         merged = {
             "enable_ai_intro": False,
             "enable_ai_summary": False,
+            "ai_provider": "openai",
             "ai_api_key": "",
             "ai_model": "gpt-3.5-turbo",
             "ai_base_url": "",
             "fixed_fallback": True,
         }
 
-        # 从文件配置中读取
+        # 文件配置（config/world_events.json 的 ai_config）
         if self.config:
-            merged.update(self.config)
+            merged.update({k: v for k, v in self.config.items() if v is not None})
 
-        # 从 AstrBot 配置中读取（优先级最高）
-        if self.config_manager:
+        # AstrBot 插件配置面板（优先级最高）
+        plugin_config = self.plugin_config
+        if plugin_config is not None and hasattr(plugin_config, "get"):
+            group = None
             try:
-                # 尝试读取 AstrBot 配置
-                astrbot_config = {}
-
-                # 读取各个配置项
-                if hasattr(self.config_manager, 'get'):
-                    ai_enabled = self.config_manager.get("world_event_ai_enabled")
-                    if ai_enabled is not None:
-                        merged["enable_ai_intro"] = bool(ai_enabled)
-                        merged["enable_ai_summary"] = bool(ai_enabled)
-
-                    ai_key = self.config_manager.get("world_event_ai_api_key")
-                    if ai_key:
-                        merged["ai_api_key"] = str(ai_key)
-
-                    ai_model = self.config_manager.get("world_event_ai_model")
-                    if ai_model:
-                        merged["ai_model"] = str(ai_model)
-
-                    ai_url = self.config_manager.get("world_event_ai_base_url")
-                    if ai_url:
-                        merged["ai_base_url"] = str(ai_url)
-
+                group = plugin_config.get(self.PLUGIN_CONFIG_GROUP, None)
             except Exception as e:
-                logger.warning(f"从 AstrBot 配置读取 AI 设置失败: {e}")
+                logger.warning(f"读取 AstrBot AI 配置失败，使用文件配置: {e}")
+                group = None
+            if isinstance(group, dict):
+                for key, value in group.items():
+                    if value is None:
+                        continue
+                    internal = self.PLUGIN_KEY_MAP.get(key, key)
+                    if internal in merged:
+                        merged[internal] = value
+
+            # 兼容旧写法：顶层 world_event_ai_* 键
+            legacy_pairs = (
+                ("world_event_ai_enabled", ("enable_ai_intro", "enable_ai_summary")),
+                ("world_event_ai_api_key", ("ai_api_key",)),
+                ("world_event_ai_model", ("ai_model",)),
+                ("world_event_ai_base_url", ("ai_base_url",)),
+            )
+            for legacy_key, targets in legacy_pairs:
+                try:
+                    legacy_value = plugin_config.get(legacy_key, None)
+                except Exception:
+                    legacy_value = None
+                if legacy_value is None:
+                    continue
+                for target in targets:
+                    merged[target] = bool(legacy_value) if isinstance(legacy_value, bool) else legacy_value
 
         return merged
 
