@@ -1451,14 +1451,14 @@ class WorldEventManager:
             except (TypeError, ValueError):
                 pass
 
-        event_id = await self.create_event(
+        event_success, event_name, event_id = await self.create_event(
             template=template,
             group_id=str(group_id),
             reward_multiplier=float(reward_multiplier),
             admin_created=True,
         )
 
-        if not event_id:
+        if not event_success or not event_id:
             return False, "❌ 创建事件失败，请稍后重试", None
 
         tier_name = template.get("tier", "未知")
