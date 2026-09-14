@@ -767,10 +767,10 @@ class RiftManager:
     ) -> Tuple[bool, str, Optional[Dict]]:
         """
         完成秘境探索
-        
+
         Args:
             user_id: 用户ID
-            
+
         Returns:
             (成功标志, 消息, 奖励数据)
         """
@@ -778,21 +778,26 @@ class RiftManager:
         player = await self.db.get_player_by_id(user_id)
         if not player:
             return False, "❌ 你还未踏入修仙之路！", None
-        
+
         # 2. 检查CD状态
         user_cd = await self.db.ext.get_user_cd(user_id)
         if not user_cd or user_cd.type != UserStatus.EXPLORING:
             return False, "❌ 你当前不在探索秘境！", None
-        
+
+        # 2.5. 检查是否为组队探索（组队探索必须由队长使用"完成组队"指令）
+        extra_data = user_cd.get_extra_data() if hasattr(user_cd, 'get_extra_data') else {}
+        is_team_exploration = extra_data.get("is_team_exploration", False)
+        if is_team_exploration:
+            return False, "❌ 你正在进行组队探索！请由队长使用 /完成组队 指令来结算奖励。", None
+
         # 3. 检查时间
         current_time = int(time.time())
         if current_time < user_cd.scheduled_time:
             remaining = user_cd.scheduled_time - current_time
             minutes = remaining // 60
             return False, f"❌ 探索尚未完成！还需要 {minutes} 分钟。", None
-        
+
         # 4. 获取秘境信息（从extra_data中读取）
-        extra_data = user_cd.get_extra_data() if hasattr(user_cd, 'get_extra_data') else {}
         rift_id = extra_data.get("rift_id", 0)
         rift_level = extra_data.get("rift_level", 1)
         level_diff = extra_data.get("level_diff", 0)  # 获取等级差
