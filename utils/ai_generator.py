@@ -171,8 +171,8 @@ class AIGenerator:
 
 直接输出描述文案，不要其他内容："""
 
-        # 调用OpenAI格式API
-        text = self._call_openai_api(prompt, max_tokens=200)
+        # 调用OpenAI格式API（增加 max_tokens 避免截断）
+        text = self._call_openai_api(prompt, max_tokens=500)
 
         # 降级处理
         if text is None and self.fixed_fallback:
@@ -213,8 +213,8 @@ class AIGenerator:
 
 直接输出总结文案，不要其他内容："""
 
-        # 调用OpenAI格式API
-        text = self._call_openai_api(prompt, max_tokens=300)
+        # 调用OpenAI格式API（增加 max_tokens 避免截断）
+        text = self._call_openai_api(prompt, max_tokens=600)
 
         # 降级处理
         if text is None and self.fixed_fallback:
@@ -265,26 +265,9 @@ class AIGenerator:
             # 添加调试日志
             logger.debug(f"AI API 原始响应: {result}")
 
-            # 获取生成的内容（兼容 DeepSeek 推理模式）
+            # 获取生成的内容
             message = result["choices"][0]["message"]
             text = message.get("content", "").strip()
-
-            # DeepSeek 推理模式：内容在 reasoning_content 中
-            if not text and "reasoning_content" in message:
-                reasoning = message["reasoning_content"].strip()
-                # 提取推理过程中的实际文案（通常在最后）
-                if reasoning:
-                    # 尝试提取 "Let's draft:" 之后的内容
-                    if "Let's draft:" in reasoning or "Let's craft." in reasoning:
-                        parts = reasoning.split("\n\n")
-                        for part in reversed(parts):
-                            # 跳过英文思考过程，找中文内容
-                            if any('一' <= c <= '鿿' for c in part) and len(part) > 20:
-                                text = part.strip()
-                                break
-                    # 如果没找到，使用整个 reasoning_content
-                    if not text:
-                        text = reasoning
 
             if not text:
                 logger.warning(f"AI生成返回空内容，原始响应: {result}")
