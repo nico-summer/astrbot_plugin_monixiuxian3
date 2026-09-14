@@ -118,26 +118,48 @@ class AdminHandlers:
                 yield event.plain_result("❌ 奖励倍率必须是数字")
                 return
 
-        success, msg, event_id = await self.world_event_mgr.create_admin_event(
+        success, event_name, event_id = await self.world_event_mgr.create_admin_event(
             admin_id=user_id,
             tier=tier,
             group_id=group_id,
             reward_multiplier=reward_multiplier,
         )
 
-        yield event.plain_result(msg)
+        if not success:
+            yield event.plain_result(event_name)  # event_name 此时是错误消息
+            return
+
+        # 成功：构建成功消息
+        tier_names = {"low": "低阶", "mid": "中阶", "high": "高阶", "epic": "史诗"}
+        success_msg = (
+            f"✅ 世界事件创建成功！\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"📋 事件ID：{event_id}\n"
+            f"🌟 {event_name}\n"
+            f"⚔️ 难度：{tier_names.get(tier, tier)}\n"
+            f"🎁 奖励倍率：{reward_multiplier}x\n"
+            f"📢 目标群：{group_id}\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"事件已创建，正在广播到目标群..."
+        )
+        yield event.plain_result(success_msg)
 
         # 创建成功后立即广播到目标群（含 AI 开场文案，AI 未开启时用固定模板）
         if success and event_id and self.broadcaster:
             try:
-                created_event = await self.world_event_mgr.get_event(event_id)
+                # 确保 event_id 是整数
+                event_id_int = int(event_id) if not isinstance(event_id, int) else event_id
+                created_event = await self.world_event_mgr.get_event(event_id_int)
                 if created_event:
                     event_data = created_event.get("data") or {}
                     intro = await self.world_event_mgr.generate_intro_text(event_data, 0)
                     text = self.world_event_mgr.format_event_broadcast(created_event, 0, intro)
                     await self.broadcaster(str(group_id), text)
+                    logger.info(f"[世界事件] 管理员事件已广播到群 {group_id}")
+                else:
+                    logger.warning(f"[世界事件] 未能查询到刚创建的事件 ID={event_id_int}")
             except Exception as e:
-                logger.warning(f"[世界事件] 管理员事件广播失败: {e}")
+                logger.warning(f"[世界事件] 管理员事件广播失败: {e}", exc_info=True)
                 yield event.plain_result(f"⚠️ 事件已创建，但广播失败：{e}")
 
     async def handle_list_templates(self, event: AstrMessageEvent):
