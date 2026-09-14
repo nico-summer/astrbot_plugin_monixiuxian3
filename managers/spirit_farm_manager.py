@@ -14,11 +14,24 @@ __all__ = ["SpiritFarmManager"]
 
 # 灵草配置 (wither_time: 成熟后枯萎时间，默认48小时)
 SPIRIT_HERBS = {
-    "灵草": {"grow_time": 3600, "exp_yield": 500, "gold_yield": 100, "wither_time": 172800},
-    "血灵草": {"grow_time": 7200, "exp_yield": 1500, "gold_yield": 300, "wither_time": 172800},
-    "冰心草": {"grow_time": 14400, "exp_yield": 4000, "gold_yield": 800, "wither_time": 172800},
-    "火焰花": {"grow_time": 28800, "exp_yield": 10000, "gold_yield": 2000, "wither_time": 172800},
-    "九叶灵芝": {"grow_time": 86400, "exp_yield": 30000, "gold_yield": 6000, "wither_time": 172800},
+    # 基础灵草（1-2星，所有等级）
+    "灵草": {"grow_time": 3600, "exp_yield": 500, "gold_yield": 100, "wither_time": 172800, "required_farm_level": 1, "seed_cost": 0, "material_output": 1},
+    "血灵草": {"grow_time": 7200, "exp_yield": 1500, "gold_yield": 300, "wither_time": 172800, "required_farm_level": 1, "seed_cost": 0, "material_output": 1},
+    "冰心草": {"grow_time": 14400, "exp_yield": 4000, "gold_yield": 800, "wither_time": 172800, "required_farm_level": 2, "seed_cost": 0, "material_output": 1},
+    "火焰花": {"grow_time": 28800, "exp_yield": 10000, "gold_yield": 2000, "wither_time": 172800, "required_farm_level": 2, "seed_cost": 0, "material_output": 1},
+    "九叶灵芝": {"grow_time": 86400, "exp_yield": 30000, "gold_yield": 6000, "wither_time": 172800, "required_farm_level": 3, "seed_cost": 0, "material_output": 1},
+
+    # 高级灵草（3星，灵田3级+）- 用于4星丹药
+    "悟道草": {"grow_time": 86400, "exp_yield": 50000, "gold_yield": 10000, "wither_time": 172800, "required_farm_level": 3, "seed_cost": 5000, "material_output": 1},
+    "护心草": {"grow_time": 86400, "exp_yield": 50000, "gold_yield": 10000, "wither_time": 172800, "required_farm_level": 3, "seed_cost": 5000, "material_output": 1},
+
+    # 稀有灵草（4星，灵田4级+）- 用于5星丹药
+    "九转仙草": {"grow_time": 172800, "exp_yield": 100000, "gold_yield": 20000, "wither_time": 259200, "required_farm_level": 4, "seed_cost": 15000, "material_output": 1},
+    "太古龙骨": {"grow_time": 172800, "exp_yield": 100000, "gold_yield": 20000, "wither_time": 259200, "required_farm_level": 4, "seed_cost": 15000, "material_output": 1},
+
+    # 传说灵草（5星，灵田5级）- 顶级材料
+    "灵髓精华": {"grow_time": 259200, "exp_yield": 200000, "gold_yield": 40000, "wither_time": 345600, "required_farm_level": 5, "seed_cost": 30000, "material_output": 2},
+    "月华精粹": {"grow_time": 259200, "exp_yield": 200000, "gold_yield": 40000, "wither_time": 345600, "required_farm_level": 5, "seed_cost": 30000, "material_output": 2},
 }
 
 # 灵田等级配置
@@ -93,6 +106,13 @@ class SpiritFarmManager:
         if not farm:
             return False, "❌ 你还没有灵田！使用 /开垦灵田"
 
+        herb_config = SPIRIT_HERBS[herb_name]
+
+        # 检查灵田等级要求
+        required_level = herb_config.get("required_farm_level", 1)
+        if farm["level"] < required_level:
+            return False, f"❌ 种植【{herb_name}】需要灵田等级 {required_level}（当前 {farm['level']}）"
+
         level_config = FARM_LEVELS.get(farm["level"], FARM_LEVELS[1])
         max_slots = level_config["slots"]
         crops = farm["crops"]
@@ -100,8 +120,15 @@ class SpiritFarmManager:
         if len(crops) >= max_slots:
             return False, f"❌ 灵田已满！最多种植 {max_slots} 株。"
 
+        # 检查种子成本
+        seed_cost = herb_config.get("seed_cost", 0)
+        if seed_cost > 0:
+            if player.gold < seed_cost:
+                return False, f"❌ 种植【{herb_name}】需要 {seed_cost:,} 灵石（种子成本）"
+            player.gold -= seed_cost
+            await self.db.update_player(player)
+
         # 种植
-        herb_config = SPIRIT_HERBS[herb_name]
         plant_time = int(time.time())
         mature_time = plant_time + herb_config["grow_time"]
 
@@ -118,8 +145,9 @@ class SpiritFarmManager:
         await self.db.conn.commit()
 
         grow_hours = herb_config["grow_time"] // 3600
+        cost_msg = f"\n消耗灵石：{seed_cost:,}（种子成本）" if seed_cost > 0 else ""
         return True, (
-            f"🌱 成功种植【{herb_name}】！\n"
+            f"🌱 成功种植【{herb_name}】！{cost_msg}\n"
             f"成熟时间：约 {grow_hours} 小时\n"
             f"当前种植：{len(crops)}/{max_slots}"
         )
@@ -134,6 +162,13 @@ class SpiritFarmManager:
         if not farm:
             return False, "❌ 你还没有灵田！使用 /开垦灵田"
 
+        herb_config = SPIRIT_HERBS[herb_name]
+
+        # 检查灵田等级要求
+        required_level = herb_config.get("required_farm_level", 1)
+        if farm["level"] < required_level:
+            return False, f"❌ 种植【{herb_name}】需要灵田等级 {required_level}（当前 {farm['level']}）"
+
         level_config = FARM_LEVELS.get(farm["level"], FARM_LEVELS[1])
         max_slots = level_config["slots"]
         crops = farm["crops"]
@@ -147,8 +182,19 @@ class SpiritFarmManager:
         # 实际种植数量：取用户请求数量和可用格子数的较小值
         actual_count = min(count, available_slots)
 
+        # 检查种子成本
+        seed_cost = herb_config.get("seed_cost", 0)
+        total_cost = seed_cost * actual_count
+        if total_cost > 0:
+            if player.gold < total_cost:
+                max_affordable = player.gold // seed_cost
+                if max_affordable <= 0:
+                    return False, f"❌ 灵石不足！种植【{herb_name}】需要 {seed_cost:,} 灵石/株"
+                return False, f"❌ 灵石不足！你最多能种植 {max_affordable} 株（需要 {total_cost:,} 灵石，当前 {player.gold:,}）"
+            player.gold -= total_cost
+            await self.db.update_player(player)
+
         # 批量种植
-        herb_config = SPIRIT_HERBS[herb_name]
         plant_time = int(time.time())
         mature_time = plant_time + herb_config["grow_time"]
 
@@ -166,7 +212,8 @@ class SpiritFarmManager:
         await self.db.conn.commit()
 
         grow_hours = herb_config["grow_time"] // 3600
-        msg = f"🌱 批量种植成功！\n"
+        cost_msg = f"\n消耗灵石：{total_cost:,}（种子成本）" if total_cost > 0 else ""
+        msg = f"🌱 批量种植成功！{cost_msg}\n"
         msg += f"种植：【{herb_name}】×{actual_count}\n"
         msg += f"成熟时间：约 {grow_hours} 小时\n"
         msg += f"当前种植：{len(crops)}/{max_slots}"
@@ -211,7 +258,8 @@ class SpiritFarmManager:
         total_gold = 0
         harvest_details = []
         herb_counts = {}
-        
+        material_counts = {}  # 材料物品计数
+
         for crop in mature_crops:
             herb_name = crop["name"]
             herb_config = SPIRIT_HERBS.get(herb_name, SPIRIT_HERBS["灵草"])
@@ -219,6 +267,10 @@ class SpiritFarmManager:
             total_gold += herb_config["gold_yield"]
             harvest_details.append(herb_name)
             herb_counts[herb_name] = herb_counts.get(herb_name, 0) + 1
+
+            # 计算材料产出
+            material_output = herb_config.get("material_output", 1)
+            material_counts[herb_name] = material_counts.get(herb_name, 0) + material_output
         
         # 应用奖励
         if total_exp > 0 or total_gold > 0:
@@ -229,7 +281,7 @@ class SpiritFarmManager:
         # 将灵草存入储物戒
         stored_items = []
         if self.storage_ring_manager:
-            for herb_name, count in herb_counts.items():
+            for herb_name, count in material_counts.items():
                 success, _ = await self.storage_ring_manager.store_item(player, herb_name, count, silent=True)
                 if success:
                     stored_items.append(f"{herb_name}×{count}")

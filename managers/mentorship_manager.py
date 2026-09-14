@@ -489,3 +489,111 @@ class MentorshipManager:
             return "您还没有师徒关系\n💡 元婴期以上可收徒，金丹期以下可拜师"
 
         return "\n".join(info_lines)
+
+    async def rescue_disciple(
+        self,
+        master_id: str,
+        disciple_id: str
+    ) -> Tuple[bool, str, Optional[Player]]:
+        """
+        师父救援徒弟（元神复活）
+
+        Args:
+            master_id: 师父ID
+            disciple_id: 徒弟ID
+
+        Returns:
+            (成功标志, 消息, 徒弟玩家对象)
+        """
+        # 1. 检查师徒关系
+        cursor = await self.db.conn.execute(
+            "SELECT status FROM mentorship WHERE mentor_id = ? AND apprentice_id = ? AND status = 'active'",
+            (master_id, disciple_id)
+        )
+        relationship = await cursor.fetchone()
+        if not relationship:
+            return False, "❌ 你们不是师徒关系！", None
+
+        # 2. 检查师父和徒弟
+        master = await self.db.get_player_by_id(master_id)
+        disciple = await self.db.get_player_by_id(disciple_id)
+
+        if not master or not disciple:
+            return False, "❌ 用户信息异常！", None
+
+        if not disciple.is_soul_state:
+            disciple_name = disciple.user_name if disciple.user_name else disciple_id
+            return False, f"❌ {disciple_name} 并未处于元神状态，无需救援！", None
+
+        # 3. 检查冷却（每个徒弟每日1次）
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        try:
+            cursor = await self.db.conn.execute(
+                "SELECT rescue_count, last_rescue_date FROM mentorship_rescue_log WHERE disciple_id = ?",
+                (disciple_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                rescue_count, last_rescue_date = row
+                if last_rescue_date == today and rescue_count >= 1:
+                    return False, f"❌ 每个徒弟每日只能被救援1次！（今日已使用）", None
+        except Exception:
+            # 表不存在，创建表
+            await self.db.conn.execute("""
+                CREATE TABLE IF NOT EXISTS mentorship_rescue_log (
+                    disciple_id TEXT PRIMARY KEY,
+                    rescue_count INTEGER DEFAULT 0,
+                    last_rescue_date TEXT
+                )
+            """)
+            await self.db.conn.commit()
+
+        # 4. 检查师父修为（至少需要10%修为）
+        min_exp = int(master.experience * 0.1)
+        if master.experience < min_exp:
+            return False, "❌ 你的修为不足以施展救援！（需要至少保留10%修为）", None
+
+        # 5. 扣除师父5%修为
+        cost_ratio = 0.05
+        exp_cost = int(master.experience * cost_ratio)
+        master.experience = max(0, master.experience - exp_cost)
+        await self.db.update_player(master)
+
+        # 6. 记录救援次数
+        try:
+            cursor = await self.db.conn.execute(
+                "SELECT rescue_count FROM mentorship_rescue_log WHERE disciple_id = ?",
+                (disciple_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                await self.db.conn.execute(
+                    "UPDATE mentorship_rescue_log SET rescue_count = 1, last_rescue_date = ? WHERE disciple_id = ?",
+                    (today, disciple_id)
+                )
+            else:
+                await self.db.conn.execute(
+                    "INSERT INTO mentorship_rescue_log (disciple_id, rescue_count, last_rescue_date) VALUES (?, 1, ?)",
+                    (disciple_id, today)
+                )
+            await self.db.conn.commit()
+        except Exception as e:
+            from astrbot.api import logger
+            logger.warning(f"记录师徒救援失败: {e}")
+
+        master_name = master.user_name if master.user_name else master_id
+        disciple_name = disciple.user_name if disciple.user_name else disciple_id
+
+        success_msg = (
+            f"✨ 师徒救援成功！\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"👤 师父：{master_name}\n"
+            f"💫 损耗修为：{exp_cost:,}（{cost_ratio:.0%}）\n"
+            f"🌟 成功接引徒弟 {disciple_name} 元神归位\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"💡 {disciple_name} 完美复活，修为无损！\n"
+            f"🙏 师恩如山，永志不忘！"
+        )
+
+        return True, success_msg, disciple

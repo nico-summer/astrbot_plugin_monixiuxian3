@@ -954,3 +954,115 @@ class SectManager:
             raise
 
         await self.db.conn.commit()
+
+    async def rescue_member(
+        self,
+        operator_id: str,
+        target_id: str
+    ) -> Tuple[bool, str, Optional[Player]]:
+        """
+        宗门救援（元神复活）
+
+        Args:
+            operator_id: 操作者ID（宗主/长老）
+            target_id: 目标用户ID（元神状态的成员）
+
+        Returns:
+            (成功标志, 消息, 目标玩家对象)
+        """
+        # 1. 检查操作者权限
+        operator = await self.db.get_player_by_id(operator_id)
+        if not operator or operator.sect_id == 0:
+            return False, "❌ 你还未加入宗门！", None
+
+        if operator.sect_position not in [0, 1]:
+            return False, "❌ 只有宗主和长老才能发起宗门救援！", None
+
+        # 2. 检查目标用户
+        target = await self.db.get_player_by_id(target_id)
+        if not target:
+            return False, "❌ 目标用户不存在！", None
+
+        if target.sect_id != operator.sect_id:
+            return False, "❌ 目标用户不在你的宗门！", None
+
+        if not target.is_soul_state:
+            target_name = target.user_name if target.user_name else target_id
+            return False, f"❌ {target_name} 并未处于元神状态，无需救援！", None
+
+        # 3. 检查宗门等级
+        sect = await self.db.ext.get_sect_by_id(operator.sect_id)
+        if not sect:
+            return False, "❌ 宗门信息异常！", None
+
+        if sect.sect_scale < 5000:
+            return False, f"❌ 宗门救援需要建设度达到 5000（当前 {sect.sect_scale}）", None
+
+        # 4. 检查冷却（每人每日1次）
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        try:
+            cursor = await self.db.conn.execute(
+                "SELECT rescue_count, last_rescue_date FROM sect_rescue_log WHERE user_id = ?",
+                (target_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                rescue_count, last_rescue_date = row
+                if last_rescue_date == today and rescue_count >= 1:
+                    return False, f"❌ 每人每日只能被救援1次！（今日已使用）", None
+        except Exception:
+            # 表不存在，创建表
+            await self.db.conn.execute("""
+                CREATE TABLE IF NOT EXISTS sect_rescue_log (
+                    user_id TEXT PRIMARY KEY,
+                    rescue_count INTEGER DEFAULT 0,
+                    last_rescue_date TEXT
+                )
+            """)
+            await self.db.conn.commit()
+
+        # 5. 检查并扣除贡献度
+        required_contribution = 500
+        if operator.sect_contribution < required_contribution:
+            return False, f"❌ 宗门救援需要 {required_contribution} 贡献度（你的贡献度：{operator.sect_contribution}）", None
+
+        operator.sect_contribution -= required_contribution
+        await self.db.update_player(operator)
+
+        # 6. 记录救援次数
+        try:
+            cursor = await self.db.conn.execute(
+                "SELECT rescue_count FROM sect_rescue_log WHERE user_id = ?",
+                (target_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                await self.db.conn.execute(
+                    "UPDATE sect_rescue_log SET rescue_count = 1, last_rescue_date = ? WHERE user_id = ?",
+                    (today, target_id)
+                )
+            else:
+                await self.db.conn.execute(
+                    "INSERT INTO sect_rescue_log (user_id, rescue_count, last_rescue_date) VALUES (?, 1, ?)",
+                    (target_id, today)
+                )
+            await self.db.conn.commit()
+        except Exception as e:
+            logger.warning(f"记录宗门救援失败: {e}")
+
+        target_name = target.user_name if target.user_name else target_id
+        operator_name = operator.user_name if operator.user_name else operator_id
+
+        success_msg = (
+            f"✨ 宗门救援成功！\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"🏛️ 宗门【{sect.sect_name}】\n"
+            f"👤 {operator_name}（{'宗主' if operator.sect_position == 0 else '长老'}）\n"
+            f"💫 消耗 {required_contribution} 贡献度\n"
+            f"🌟 成功接引 {target_name} 元神归位\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"💡 {target_name} 完美复活，修为无损！"
+        )
+
+        return True, success_msg, target

@@ -132,6 +132,7 @@ CMD_DONATE_TECHNIQUE = "捐献功法"
 CMD_BORROW_TECHNIQUE = "借用功法"
 CMD_SECT_TASKS = "宗门任务"
 CMD_SECT_RIFT = "宗门秘境"
+CMD_SECT_RESCUE = "宗门救援"  # 批次6：宗门救援复活
 
 # Boss系统指令
 CMD_BOSS_INFO = "世界boss"
@@ -223,6 +224,7 @@ CMD_MENTORSHIP_INFO = "师徒信息"
 CMD_INITIATION = "灌顶"
 CMD_EXPEL_APPRENTICE = "逐出师门"
 CMD_LEAVE_MENTOR = "离开师门"
+CMD_MENTORSHIP_RESCUE = "救援徒弟"  # 批次6：师徒救援复活
 
 # 组队系统
 CMD_CREATE_TEAM = "创建队伍"
@@ -1563,6 +1565,27 @@ class XiuXianPlugin(Star):
         async for r in self.rift_handlers.handle_sect_rift(event, level):
             yield r
 
+    @filter.command(CMD_SECT_RESCUE, "宗门救援元神弟子")
+    @require_whitelist
+    async def handle_sect_rescue(self, event: AstrMessageEvent):
+        user_id = event.sender_id
+        # 解析@的目标用户
+        at_list = event.get_mentions()
+        if not at_list:
+            yield event.plain_result(f"❌ 请@需要救援的成员\n例如：/{CMD_SECT_RESCUE} @某人")
+            return
+
+        target_id = at_list[0]
+        success, message, target_player = await self.sect_mgr.rescue_member(user_id, target_id)
+
+        if success and target_player:
+            # 执行复活
+            target_player.is_soul_state = False
+            target_player.soul_state_start_time = 0
+            await self.db.update_player(target_player)
+
+        yield event.plain_result(message)
+
     # ===== Boss系统指令 =====
 
     @filter.command(CMD_BOSS_INFO, "查看世界Boss状态")
@@ -2076,6 +2099,27 @@ class XiuXianPlugin(Star):
     async def handle_leave_mentor(self, event: AstrMessageEvent):
         async for r in self.mentorship_handlers.handle_leave_mentor(event):
             yield r
+
+    @filter.command(CMD_MENTORSHIP_RESCUE, "师父救援元神徒弟")
+    @require_whitelist
+    async def handle_mentorship_rescue(self, event: AstrMessageEvent):
+        user_id = event.sender_id
+        # 解析@的目标用户
+        at_list = event.get_mentions()
+        if not at_list:
+            yield event.plain_result(f"❌ 请@需要救援的徒弟\n例如：/{CMD_MENTORSHIP_RESCUE} @某人")
+            return
+
+        target_id = at_list[0]
+        success, message, target_player = await self.mentorship_mgr.rescue_apprentice(user_id, target_id)
+
+        if success and target_player:
+            # 执行复活
+            target_player.is_soul_state = False
+            target_player.soul_state_start_time = 0
+            await self.db.update_player(target_player)
+
+        yield event.plain_result(message)
 
     # ===== 组队系统指令 =====
 
