@@ -261,7 +261,14 @@ class AIGenerator:
 
             # 解析响应
             result = response.json()
+
+            # 添加调试日志
+            logger.debug(f"AI API 原始响应: {result}")
+
             text = result["choices"][0]["message"]["content"].strip()
+
+            if not text:
+                logger.warning(f"AI生成返回空内容，原始响应: {result}")
 
             logger.info(f"AI生成成功 (模型: {self.model}, 长度: {len(text)}字)")
             return text

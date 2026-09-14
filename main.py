@@ -1011,20 +1011,46 @@ class XiuXianPlugin(Star):
         from astrbot.api.event import MessageChain
 
         if not group_id or not message:
+            logger.warning(f"【修仙插件】广播参数不完整: group_id={group_id}, message={'有内容' if message else '空'}")
             return
 
         message_chain = MessageChain().message(message)
+
+        # 尝试多种会话ID格式
+        session_formats = [
+            f"default:GroupMessage:{group_id}",  # AstrBot 默认格式
+            f"aiocqhttp:GroupMessage:{group_id}",  # CQHTTP 格式
+            f"onebot:GroupMessage:{group_id}",  # OneBot 格式
+        ]
+
+        sent_success = False
         try:
             platforms = self.context.platform_manager.get_insts()
+            logger.info(f"【修仙插件】准备广播到群 {group_id}，共有 {len(platforms)} 个平台实例")
+
             for platform in platforms:
                 platform_name = platform.meta().name if hasattr(platform, 'meta') and callable(platform.meta) else "unknown"
-                umo = f"{platform_name}:GroupMessage:{group_id}"
-                try:
-                    await self.context.send_message(umo, message_chain)
-                except Exception as e:
-                    logger.warning(f"【修仙插件】世界事件广播发送失败 (群{group_id}): {e}")
+
+                # 尝试多种格式
+                for session_format in session_formats:
+                    try:
+                        logger.debug(f"【修仙插件】尝试会话格式: {session_format}")
+                        await self.context.send_message(session_format, message_chain)
+                        logger.info(f"【修仙插件】✅ 成功通过格式 {session_format} 广播到群 {group_id}")
+                        sent_success = True
+                        break  # 成功后不再尝试其他格式
+                    except Exception as e:
+                        logger.debug(f"【修仙插件】格式 {session_format} 失败: {e}")
+                        continue
+
+                if sent_success:
+                    break  # 成功后不再尝试其他平台
+
+            if not sent_success:
+                logger.error(f"【修仙插件】❌ 所有会话格式都失败，无法广播到群 {group_id}")
+
         except Exception as e:
-            logger.error(f"【修仙插件】世界事件广播异常: {e}")
+            logger.error(f"【修仙插件】世界事件广播异常: {e}", exc_info=True)
 
     @filter.command(CMD_HELP, "显示帮助信息（可指定系统：修仙帮助 宗门）")
     @require_whitelist
