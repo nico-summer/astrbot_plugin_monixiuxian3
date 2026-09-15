@@ -322,28 +322,22 @@
     "type": "object",
     "items": {
       "SOUL_REVIVAL_HOURS": {
-        "description": "元神自然复活所需小时数",
+        "description": "元神自动复活所需小时数",
         "type": "float",
         "default": 24,
-        "hint": "金丹期及以上死亡后进入元神状态，等待该时长后可发送「自然复活」；超时 4 倍仍未复活则修为归零并强制复活。"
+        "hint": "金丹期及以上死亡后进入元神状态，等待该时长后自动复活（无需手动命令）。-1 表示永久等待，需使用还魂丹复活。"
       },
       "SOUL_EXP_LOSS_RATE": {
-        "description": "自然复活永久损失修为比例",
+        "description": "死亡时立即损失修为比例",
         "type": "float",
         "default": 0.05,
-        "hint": "0.05 表示自然复活永久损失 5% 修为；使用还魂丹复活无任何损失。"
+        "hint": "0.05 表示死亡时立即损失 5% 修为，之后不再流失；使用还魂丹复活无任何损失。"
       },
       "REBIRTH_EXP_KEEP_RATE": {
         "description": "「劫后重生」保留修为比例",
         "type": "float",
         "default": 0.7,
         "hint": "练气期-筑基期首次死亡触发劫后重生：境界倒退 1 级并保留该比例修为（默认 70%）；仅一次机会，第二次死亡彻底陨落删号。"
-      },
-      "SOUL_EXP_DECAY_PER_HOUR": {
-        "description": "元神状态每小时修为流失比例",
-        "type": "float",
-        "default": 0.01,
-        "hint": "元神状态期间每小时流失的修为比例（默认 1%/小时）。"
       }
     }
   },
@@ -410,6 +404,18 @@
         "type": "float",
         "default": 0.2,
         "hint": "境界低于事件最低门槛时，在基础死亡率上额外增加的比例（默认 +20%）。"
+      },
+      "ENABLE_COMBAT_POWER_REDUCTION": {
+        "description": "启用战力影响死亡率",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，玩家的装备和丹药buff会降低世界事件死亡率（最多减免30%）。关闭则死亡率只看境界。"
+      },
+      "COMBAT_POWER_MAX_REDUCTION": {
+        "description": "战力最大减免比例",
+        "type": "float",
+        "default": 0.30,
+        "hint": "战力对死亡率的最大减免比例（0.30=最多减免30%）。战力越高减免越多，同境界神装+buff比裸奔安全30%。"
       },
       "BROADCAST_GROUPS": {
         "description": "事件广播群号列表",
