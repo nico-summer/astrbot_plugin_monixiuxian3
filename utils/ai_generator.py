@@ -181,7 +181,8 @@ class AIGenerator:
         return text or f"【{event_name}】降临！"
 
     def generate_event_summary(self, event_name: str, participants: list,
-                              deaths: list, survivors: list) -> str:
+                              deaths: list, survivors: list,
+                              rewards_summary: str = "") -> str:
         """
         生成世界事件战斗总结
 
@@ -190,6 +191,8 @@ class AIGenerator:
             participants: 所有参与者名称列表
             deaths: 阵亡者名称列表
             survivors: 幸存者名称列表
+            rewards_summary: 本次稀有掉落摘要（可选，v3.9.1 修复：此前调用方传了
+                该参数但函数未接收，导致 AI 总结每次都抛错降级为固定模板）
 
         Returns:
             str: 战斗总结文案
@@ -197,19 +200,21 @@ class AIGenerator:
         if not self.enable_summary:
             return self._fixed_summary(event_name, deaths, survivors)
 
+        reward_line = f"\n- 稀有掉落：{rewards_summary}" if rewards_summary else ""
         prompt = f"""你是一个修仙小说作家。请为世界事件生成战斗总结。
 
 事件信息：
 - 事件名称：{event_name}
 - 参与人数：{len(participants)}人
 - 阵亡人数：{len(deaths)}人
-- 幸存人数：{len(survivors)}人
+- 幸存人数：{len(survivors)}人{reward_line}
 
 要求：
 1. 修仙小说风格，含阵亡与幸存者的故事
 2. 150-200字
 3. 不要具体列举玩家名字（会在后面单独列出）
 4. 突出战斗的惨烈和幸存者的不易
+5. 有稀有掉落时可自然带过一句
 
 直接输出总结文案，不要其他内容："""
 

@@ -7,6 +7,10 @@
 设计要点：
 - 事件按群独立：每个群一份报名名单与结算结果，同名事件可在多个群同时开启
 - 阵亡会触发批次1 的死亡机制（低阶「劫后重生」/ 金丹以上「元神状态」）
+- v3.9.1 起死亡率为「境界压制」模型：境界越高死亡风险越低，
+  高出事件推荐上限 death_safe_level_gap 级（默认 6 级）后**完全免死**，
+  不会再出现炼虚期修士被低阶妖兽围城骰死的情况
+- v3.9.1 起持有「回生丹」的玩家阵亡时优先被丹药抵消（与突破走火入魔同逻辑）
 - 幸存者拿全额奖励，阵亡者按 death_penalty_reward_rate（默认 20%）结算
 - 奖励含稀有炼丹材料（九转仙草 / 太古龙骨 / 灵髓精华 / 月华精粹），用于炼制还魂丹
 """
@@ -38,6 +42,10 @@ PLUGIN_KEY_MAP = {
     "MIN_PARTICIPANTS": "min_participants",
     "MAX_PARTICIPANTS": "max_participants",
     "DEATH_PENALTY_REWARD_RATE": "death_penalty_reward_rate",
+    "DEATH_IN_RANGE_REDUCTION": "death_in_range_reduction",
+    "DEATH_OVER_LEVEL_DECAY": "death_over_level_decay",
+    "DEATH_SAFE_LEVEL_GAP": "death_safe_level_gap",
+    "DEATH_UNDER_LEVEL_PENALTY": "death_under_level_penalty",
     "BROADCAST_GROUPS": "broadcast_groups",
     "ADMIN_USERS": "admin_users",
 }
@@ -156,6 +164,20 @@ class WorldEventManager:
 
         merged.update(_extract_plugin_world_event_config(self.plugin_config, merged))
         return merged
+
+    def _death_rate_display(self, event_data: dict) -> str:
+        """死亡率展示文案（基础值 + 境界压制说明，避免玩家误以为人人同概率）"""
+        base = int(self._to_float(event_data.get("base_death_rate"), 0.0) * 100)
+        gap = max(
+            0,
+            self._to_int(
+                self._config().get("death_safe_level_gap"),
+                DEFAULT_WORLD_EVENT_CONFIG["death_safe_level_gap"],
+            ),
+        )
+        if gap > 0:
+            return f"{base}%（基准·境界越高越低，高出推荐上限{gap}级免死）"
+        return f"{base}%"
 
     def _templates(self) -> Dict[str, List[dict]]:
         """获取事件模板（按难度分组）"""
@@ -632,7 +654,7 @@ class WorldEventManager:
             f"✅ 报名成功！你已加入【{event_data.get('name', '世界事件')}】\n"
             f"{SEP}\n"
             f"👥 当前报名人数：{current_count}/{max_participants}\n"
-            f"💀 预估死亡率：{int(self._to_float(event_data.get('base_death_rate'), 0) * 100)}%\n"
+            f"💀 预估死亡率：{self._death_rate_display(event_data)}\n"
             f"⏰ 报名截止后将自动开战，请留意群消息"
         )
 
@@ -734,7 +756,7 @@ class WorldEventManager:
         lines.extend([
             f"👥 参战道友：{len(participants)} 人",
             f"⏰ 预计 {duration_minutes} 分钟后结算",
-            f"💀 预估死亡率：{int(self._to_float(event_data.get('base_death_rate'), 0) * 100)}%",
+            f"💀 预估死亡率：{self._death_rate_display(event_data)}",
             SEP,
             "🙏 祝各位道友旗开得胜，平安归来",
         ])
@@ -777,6 +799,7 @@ class WorldEventManager:
             "participants": len(participants),
             "survivors": [],
             "deaths": [],
+            "saved": [],
             "fallen": [],
             "rewards": {},
             "not_stored": [],
@@ -800,8 +823,14 @@ class WorldEventManager:
 
             player_name = player.user_name or f"道友{str(user_id)[:6]}"
             death_rate = self._calc_death_rate(player, base_death_rate, min_level, max_level)
-            died = random.random() < death_rate
+            # death_rate 为 0 表示已被境界压制完全免死，连骰子都不掷
+            died = death_rate > 0 and random.random() < death_rate
             reward_rate = 1.0
+
+            if died and await self._try_resurrect_pill(player):
+                # 回生丹抵消本次阵亡（属性减半但活下来），按生还结算
+                died = False
+                results["saved"].append({"user_id": str(user_id), "name": player_name})
 
             if died:
                 outcome = await self._apply_death(player)
@@ -834,23 +863,86 @@ class WorldEventManager:
 
         logger.info(
             f"[世界事件] 事件【{name}】(event_id={event_id}) 结算完成："
-            f"生还 {len(results['survivors'])} / 阵亡 {len(results['deaths'])} / "
-            f"陨落 {len(results['fallen'])}"
+            f"生还 {len(results['survivors'])} / 回生丹免死 {len(results['saved'])} / "
+            f"阵亡 {len(results['deaths'])} / 陨落 {len(results['fallen'])}"
         )
 
         # 总结文案：AI 生成（未开启 AI 时使用固定模板）
         summary = await self.generate_summary_text(results)
         return True, self.format_result_message(results, summary), results
 
+    @staticmethod
+    def _clamp_rate(value, default: float = 0.0) -> float:
+        """把概率限制在 0~1（非法值回退默认值）"""
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return default
+
     def _calc_death_rate(self, player: Player, base_death_rate: float, min_level: int, max_level: int) -> float:
-        """计算玩家本次事件的死亡率（境界越低越危险）"""
-        death_rate = base_death_rate
-        level_index = self._to_int(player.level_index, 0)
-        if level_index < min_level:
-            death_rate += 0.2
-        elif level_index < (min_level + max_level) // 2:
-            death_rate += 0.1
-        return max(0.0, min(1.0, death_rate))
+        """计算玩家本次事件的死亡率（境界越高越安全，境界压制到一定程度后完全免死）
+
+        规则（参数见 config/world_events.json 的 world_event_config / 插件配置面板）：
+        1. 基础值取模板 ``base_death_rate``，为 0 时直接免死
+        2. 低于事件最低门槛：额外 + ``death_under_level_penalty``（默认 0.2）
+        3. 处于推荐区间 [min_level, max_level] 内：从门槛处的 100% 线性衰减到
+           上限处的 ``1 - death_in_range_reduction``（默认只剩一半）
+        4. 高于推荐上限：在 3 的基础上每高 1 级再乘 ``death_over_level_decay``（默认 0.6）
+        5. 高出推荐上限达到 ``death_safe_level_gap`` 级（默认 6 级）时**完全免死**（返回 0）
+
+        返回 0 表示无论骰子如何都不会阵亡。
+        """
+        base = max(0.0, self._to_float(base_death_rate, 0.0))
+        if base <= 0.0:
+            return 0.0
+
+        config = self._config()
+        reduction = self._clamp_rate(
+            config.get("death_in_range_reduction"),
+            DEFAULT_WORLD_EVENT_CONFIG["death_in_range_reduction"],
+        )
+        level_index = self._to_int(getattr(player, "level_index", 0), 0)
+        min_level = self._to_int(min_level, 0)
+        max_level = self._to_int(max_level, 0)
+
+        # 境界压制：高出推荐上限后风险指数级下降，达到安全阈值直接免死
+        if max_level > 0 and level_index > max_level:
+            safe_gap = max(
+                0,
+                self._to_int(
+                    config.get("death_safe_level_gap"),
+                    DEFAULT_WORLD_EVENT_CONFIG["death_safe_level_gap"],
+                ),
+            )
+            gap = level_index - max_level
+            if safe_gap > 0 and gap >= safe_gap:
+                return 0.0
+            decay = self._to_float(
+                config.get("death_over_level_decay"),
+                DEFAULT_WORLD_EVENT_CONFIG["death_over_level_decay"],
+            )
+            decay = min(0.95, max(0.0, decay))
+            return self._clamp_rate(base * (1.0 - reduction) * (decay ** gap))
+
+        # 低于最低门槛：更危险
+        if min_level > 0 and level_index < min_level:
+            penalty = max(
+                0.0,
+                self._to_float(
+                    config.get("death_under_level_penalty"),
+                    DEFAULT_WORLD_EVENT_CONFIG["death_under_level_penalty"],
+                ),
+            )
+            return self._clamp_rate(base + penalty)
+
+        # 模板未定义有效区间（max_level <= min_level）时不参与区间衰减
+        if max_level <= min_level:
+            return self._clamp_rate(base)
+
+        # 推荐区间内：境界越高死亡率越低
+        span = max(1, max_level - min_level)
+        position = min(1.0, max(0.0, (level_index - min_level) / span))
+        return self._clamp_rate(base * (1.0 - reduction * position))
 
     async def _apply_death(self, player: Player):
         """触发批次1 的死亡机制（未注入 DeathManager 时按规则兜底）"""
@@ -862,6 +954,28 @@ class WorldEventManager:
 
         fallback = DeathManager(self.db, self.config_manager)
         return await fallback.apply_death(player)
+
+    async def _try_resurrect_pill(self, player: Player) -> bool:
+        """阵亡瞬间检查「回生丹」是否抵消本次死亡
+
+        与突破走火入魔（``core/breakthrough_manager.py``）共用同一套丹药逻辑：
+        回生丹消耗后属性减半，但玩家保住性命。
+        """
+        if not getattr(player, "has_resurrection_pill", False):
+            return False
+
+        try:
+            from ..core.pill_manager import PillManager
+
+            pill_manager = PillManager(self.db, self.config_manager)
+            resurrected = await pill_manager.handle_resurrection(player)
+        except Exception as e:
+            logger.error(f"[世界事件] 回生丹结算失败: {e}")
+            return False
+
+        if resurrected:
+            logger.info(f"[世界事件] 玩家 {player.user_id} 触发回生丹，抵消本次阵亡")
+        return bool(resurrected)
 
     def _calculate_rewards(self, event_data: dict, multiplier: float) -> dict:
         """按事件模板随机计算奖励（multiplier 已包含阵亡惩罚比例）"""
@@ -1047,10 +1161,10 @@ class WorldEventManager:
 
         survivors = results.get("survivors") or []
         deaths = results.get("deaths") or []
+        saved = results.get("saved") or []
         fallen = results.get("fallen") or []
 
-
-        participants = [item.get("name", "") for item in (survivors + deaths + fallen)]
+        participants = [item.get("name", "") for item in (survivors + saved + deaths + fallen)]
 
         drop_counter: Dict[str, int] = {}
         for rewards in (results.get("rewards") or {}).values():
@@ -1064,7 +1178,7 @@ class WorldEventManager:
                 results.get("name", "世界事件"),
                 participants,
                 deaths,
-                survivors,
+                survivors + saved,  # 回生丹幸存者一并按生还者提供给文案生成
                 rewards_summary,
             ) or ""
         except Exception as e:
@@ -1161,7 +1275,7 @@ class WorldEventManager:
             f"⚔️ 难度：{event_data.get('tier', '未知')}",
             f"📊 推荐境界：{self._get_level_name(self._to_int(event_data.get('min_level'), 0))}"
             f" - {self._get_level_name(self._to_int(event_data.get('max_level'), 0))}",
-            f"💀 预估死亡率：{int(self._to_float(event_data.get('base_death_rate'), 0) * 100)}%",
+            f"💀 预估死亡率：{self._death_rate_display(event_data)}",
             f"🎁 奖励倍率：{self._to_float(event_data.get('reward_multiplier'), 1.0)}x",
             f"⏰ 报名剩余：{self.format_duration(remaining)}",
             SEP,
@@ -1178,7 +1292,7 @@ class WorldEventManager:
             f"⚔️ 【{event_data.get('name', '世界事件')}】进行中\n"
             f"{SEP}\n"
             f"⏰ 剩余时间：{self.format_duration(self._remaining_seconds(event))}\n"
-            f"💀 预估死亡率：{int(self._to_float(event_data.get('base_death_rate'), 0) * 100)}%\n"
+            f"💀 预估死亡率：{self._death_rate_display(event_data)}\n"
             f"{SEP}\n"
             f"🎁 奖励结算后公布"
         )
@@ -1194,8 +1308,8 @@ class WorldEventManager:
 
         survivors = results.get("survivors") or []
         deaths = results.get("deaths") or []
+        saved = results.get("saved") or []
         fallen = results.get("fallen") or []
-
 
         if summary:
             lines.append(summary)
@@ -1208,10 +1322,13 @@ class WorldEventManager:
                 f"{item['name']}（{'元神' if item.get('soul') else '劫后重生'}）" for item in deaths
             )
             lines.append(f"💀 阵亡（{int(self._to_float(self._config().get('death_penalty_reward_rate'), 0.2) * 100)}% 奖励）：{names}")
+        if saved:
+            names = "、".join(item["name"] for item in saved)
+            lines.append(f"🛡️ 回生丹显灵·免于一死（全额奖励）：{names}")
         if fallen:
             names = "、".join(item["name"] for item in fallen)
             lines.append(f"🪦 彻底陨落：{names}")
-        if not (survivors or deaths or fallen):
+        if not (survivors or saved or deaths or fallen):
             lines.append("🌫️ 无人参与本次事件")
 
         # 统计本次掉落的稀有物品
@@ -1325,7 +1442,7 @@ class WorldEventManager:
             f"⚔️ 难度：{event_data.get('tier', '未知')}",
             f"📊 推荐境界：{self._get_level_name(self._to_int(event_data.get('min_level'), 0))}"
             f" - {self._get_level_name(self._to_int(event_data.get('max_level'), 0))}",
-            f"💀 预估死亡率：{int(self._to_float(event_data.get('base_death_rate'), 0) * 100)}%",
+            f"💀 预估死亡率：{self._death_rate_display(event_data)}",
             f"🎁 奖励倍率：{self._to_float(event_data.get('reward_multiplier'), 1.0)}x",
             f"👥 报名人数：{participants}/{max_participants}",
         ]

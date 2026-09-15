@@ -387,6 +387,30 @@
         "default": 0.2,
         "hint": "事件中阵亡（未彻底陨落）的玩家可获得奖励的比例，默认 0.2（20%）；幸存者始终拿全额奖励。"
       },
+      "DEATH_IN_RANGE_REDUCTION": {
+        "description": "推荐区间内死亡率衰减比例",
+        "type": "float",
+        "default": 0.5,
+        "hint": "境界处于事件推荐区间内时，死亡率从最低门槛处的 100% 线性衰减到推荐上限处的（1 - 本值）。默认 0.5 表示站在推荐上限时死亡风险只剩一半。"
+      },
+      "DEATH_OVER_LEVEL_DECAY": {
+        "description": "高出推荐上限的每级衰减系数",
+        "type": "float",
+        "default": 0.6,
+        "hint": "境界每高出事件推荐上限 1 级，死亡率乘以该系数（默认 0.6），境界越高越难死。"
+      },
+      "DEATH_SAFE_LEVEL_GAP": {
+        "description": "绝对免死境界差",
+        "type": "int",
+        "default": 6,
+        "hint": "境界高出事件推荐上限达到该级数后完全免死（死亡率 0，不掷骰子）。默认 6 级，填 0 表示关闭该规则。"
+      },
+      "DEATH_UNDER_LEVEL_PENALTY": {
+        "description": "低于门槛的额外死亡率",
+        "type": "float",
+        "default": 0.2,
+        "hint": "境界低于事件最低门槛时，在基础死亡率上额外增加的比例（默认 +20%）。"
+      },
       "BROADCAST_GROUPS": {
         "description": "事件广播群号列表",
         "type": "list",

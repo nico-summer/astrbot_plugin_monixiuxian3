@@ -185,7 +185,7 @@ class RevivalHandler:
             "💡 复活方式：",
             f"1. 发送「自然复活」（需等待 {self.format_duration(self.revival_hours)}，永久损失 {self.exp_loss_rate:.0%} 修为）",
             "2. 使用还魂丹（立即复活，无修为损失，由炼丹师炼制）",
-            "3. 请求宗门/师父救援（后续开放）",
+            "3. 宗门救援 / 师父救援（由宗主·长老或师父发起，完美复活）",
             f"{SEP}",
             "⚠️ 元神状态下无法修炼与战斗，请尽快复活！",
         ]
@@ -204,7 +204,8 @@ class RevivalHandler:
         Args:
             player: 玩家对象
             loss_rate: 永久损失的修为比例，默认取配置「soul_exp_loss_rate」
-            reason: 复活来源（natural=自然复活 / pill=还魂丹 / force=超时强制）
+            reason: 复活来源（natural=自然复活 / pill=还魂丹 / force=超时强制 /
+                rescue=宗门·师门救援）
 
         Returns:
             (是否复活成功, 消息)
@@ -250,6 +251,12 @@ class RevivalHandler:
                 f"💫 当前修为：{player.experience}\n"
                 f"{SEP}\n"
                 "💡 元神状态已解除，可以继续修炼与战斗了"
+            )
+
+        if reason == "rescue":
+            return True, (
+                "✨ 元神归位，肉身重塑！\n"
+                f"💫 {player.user_name or player.user_id} 当前修为：{player.experience}（无损）"
             )
 
         return True, (

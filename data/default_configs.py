@@ -90,6 +90,10 @@ DEFAULT_WORLD_EVENT_CONFIG = {
     "min_participants": 1,                 # 报名人数不足则取消事件
     "signup_duration_seconds": 300,        # 报名时长（秒）
     "death_penalty_reward_rate": 0.2,      # 阵亡（未彻底陨落）玩家的奖励保留比例
+    "death_in_range_reduction": 0.5,       # 境界在推荐区间内时死亡率从门槛→上限线性衰减的比例
+    "death_over_level_decay": 0.6,         # 境界每高出推荐上限 1 级，死亡率的乘算衰减系数
+    "death_safe_level_gap": 6,             # 高出推荐上限达到该级数后完全免死（0=关闭免死规则）
+    "death_under_level_penalty": 0.2,      # 低于事件最低门槛时额外增加的死亡率
     "auto_tier_weights": {                 # 自动生成时各难度权重
         "low_tier": 40,
         "mid_tier": 30,

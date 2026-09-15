@@ -1605,10 +1605,14 @@ class XiuXianPlugin(Star):
         success, message, target_player = await self.sect_mgr.rescue_member(user_id, target_id)
 
         if success and target_player:
-            # 执行复活
-            target_player.is_soul_state = False
-            target_player.soul_state_start_time = 0
-            await self.db.update_player(target_player)
+            # 复活统一走 RevivalHandler：此前只改 is_soul_state（且写了一个不存在的
+            # soul_state_start_time 字段），导致被救者修为永久停在被砍半的 50%，
+            # soul_death_time / soul_exp_before_death 也会残留
+            ok, revive_msg = await self.revival_handler.revive_soul(
+                target_player, loss_rate=0.0, reason="rescue"
+            )
+            if ok:
+                message = f"{message}\n{revive_msg}"
 
         yield event.plain_result(message)
 
@@ -2137,13 +2141,17 @@ class XiuXianPlugin(Star):
             return
 
         target_id = at_list[0]
-        success, message, target_player = await self.mentorship_mgr.rescue_apprentice(user_id, target_id)
+        # 修复：管理器中该方法名为 rescue_disciple（此前调用不存在的
+        # rescue_apprentice，导致「师父救援」指令直接抛 AttributeError）
+        success, message, target_player = await self.mentorship_mgr.rescue_disciple(user_id, target_id)
 
         if success and target_player:
-            # 执行复活
-            target_player.is_soul_state = False
-            target_player.soul_state_start_time = 0
-            await self.db.update_player(target_player)
+            # 复活统一走 RevivalHandler（原因同宗门救援）
+            ok, revive_msg = await self.revival_handler.revive_soul(
+                target_player, loss_rate=0.0, reason="rescue"
+            )
+            if ok:
+                message = f"{message}\n{revive_msg}"
 
         yield event.plain_result(message)
 
