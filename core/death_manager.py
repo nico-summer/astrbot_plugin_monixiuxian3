@@ -38,10 +38,9 @@ SOUL_STATE_LEVEL_INDEX = 13
 
 # 内核默认值（与 config/death_config.json、_conf_schema.json 保持一致）
 DEFAULT_DEATH_CONFIG = {
-    "soul_revival_hours": 24,
-    "soul_exp_loss_rate": 0.05,
-    "rebirth_exp_keep_rate": 0.7,
-    "soul_exp_decay_per_hour": 0.01,
+    "soul_revival_hours": 24,  # 元神复活等待时间（小时），-1表示永久等待
+    "soul_exp_loss_rate": 0.05,  # 死亡时立即损失的修为比例（0.05=损失5%）
+    "rebirth_exp_keep_rate": 0.7,  # 劫后重生保留修为比例（0.7=保留70%）
 }
 
 # AstrBot 插件配置（_conf_schema.json）中的死亡配置分组名
@@ -51,7 +50,6 @@ PLUGIN_KEY_MAP = {
     "SOUL_REVIVAL_HOURS": "soul_revival_hours",
     "SOUL_EXP_LOSS_RATE": "soul_exp_loss_rate",
     "REBIRTH_EXP_KEEP_RATE": "rebirth_exp_keep_rate",
-    "SOUL_EXP_DECAY_PER_HOUR": "soul_exp_decay_per_hour",
 }
 # 兼容旧写法：顶层直接放 death_config
 LEGACY_PLUGIN_CONFIG_KEY = "death_config"
@@ -138,7 +136,6 @@ class DeathOutcome:
     keep_rate: float = 1.0
     revival_hours: float = DEFAULT_DEATH_CONFIG["soul_revival_hours"]
     exp_loss_rate: float = DEFAULT_DEATH_CONFIG["soul_exp_loss_rate"]
-    decay_per_hour: float = DEFAULT_DEATH_CONFIG["soul_exp_decay_per_hour"]
 
     @property
     def is_rebirth(self) -> bool:
@@ -218,13 +215,11 @@ class DeathManager:
             death_config.get("soul_revival_hours"),
             DEFAULT_DEATH_CONFIG["soul_revival_hours"],
         )
-        exp_loss_rate = self._to_float(
-            death_config.get("soul_exp_loss_rate"),
-            DEFAULT_DEATH_CONFIG["soul_exp_loss_rate"],
-        )
-        decay_per_hour = self._to_float(
-            death_config.get("soul_exp_decay_per_hour"),
-            DEFAULT_DEATH_CONFIG["soul_exp_decay_per_hour"],
+        exp_loss_rate = self._clamp_rate(
+            self._to_float(
+                death_config.get("soul_exp_loss_rate"),
+                DEFAULT_DEATH_CONFIG["soul_exp_loss_rate"],
+            )
         )
 
         if player.level_index < SOUL_STATE_LEVEL_INDEX:
@@ -249,7 +244,6 @@ class DeathManager:
                     keep_rate=keep_rate,
                     revival_hours=revival_hours,
                     exp_loss_rate=exp_loss_rate,
-                    decay_per_hour=decay_per_hour,
                 )
 
             # 第二次死亡：彻底陨落
@@ -263,22 +257,26 @@ class DeathManager:
                 keep_rate=keep_rate,
                 revival_hours=revival_hours,
                 exp_loss_rate=exp_loss_rate,
-                decay_per_hour=decay_per_hour,
             )
 
-        # 金丹期及以上：肉身崩解，进入元神状态
+        # 金丹期及以上：肉身崩解，进入元神状态，死亡时立即扣除修为
         level_index = player.level_index
+        exp_before_death = player.experience
+        exp_lost = int(exp_before_death * exp_loss_rate)
+        player.experience = max(0, exp_before_death - exp_lost)
+
         player.is_soul_state = True
         player.soul_death_time = int(time.time())
-        player.soul_exp_before_death = player.experience  # 保存死亡前的完整修为
-        player.experience = int(player.experience * 0.5)  # 元神期间展示修为=死亡前50%
+        player.soul_exp_before_death = exp_before_death  # 记录死亡前修为（用于显示）
         player.state = "元神"
         player.cultivation_start_time = 0
         await self.db.update_player(player)
 
         logger.info(
             f"玩家 {player.user_id} 进入元神状态（境界 {level_index}），"
-            f"自然复活需 {revival_hours:.0f} 小时"
+            f"死亡损失 {exp_loss_rate*100:.1f}% 修为（{exp_lost}），"
+            f"剩余修为 {player.experience}，"
+            f"将在 {revival_hours:.0f} 小时后自动复活"
         )
         return DeathOutcome(
             kind="soul",
@@ -287,5 +285,59 @@ class DeathManager:
             keep_rate=keep_rate,
             revival_hours=revival_hours,
             exp_loss_rate=exp_loss_rate,
-            decay_per_hour=decay_per_hour,
+        )
+
+    # ===== 自动复活检查 =====
+
+    async def check_auto_revival(self, player: Player) -> bool:
+        """检查玩家是否到达自动复活时间，如果是则自动复活
+
+        Args:
+            player: 玩家对象
+
+        Returns:
+            bool: 是否执行了自动复活
+        """
+        if not player.is_soul_state:
+            return False
+
+        death_config = self.get_death_config()
+        revival_hours = self._to_float(
+            death_config.get("soul_revival_hours"),
+            DEFAULT_DEATH_CONFIG["soul_revival_hours"],
+        )
+
+        # -1表示永久等待，需要手动复活（使用还魂丹）
+        if revival_hours < 0:
+            return False
+
+        now = int(time.time())
+        death_time = player.soul_death_time or now
+        elapsed_hours = (now - death_time) / 3600.0
+
+        # 时间未到，继续等待
+        if elapsed_hours < revival_hours:
+            return False
+
+        # 时间已到，自动复活
+        await self.auto_revive_player(player)
+        return True
+
+    async def auto_revive_player(self, player: Player):
+        """自动复活玩家（时间到达后）"""
+        if not player.is_soul_state:
+            return
+
+        # 复活：清除元神状态，恢复到正常状态
+        player.is_soul_state = False
+        player.soul_death_time = 0
+        player.soul_exp_before_death = 0
+        player.state = "空闲"
+        player.cultivation_start_time = 0
+
+        await self.db.update_player(player)
+
+        logger.info(
+            f"玩家 {player.user_id} 自动复活（元神状态结束），"
+            f"当前修为 {player.experience}"
         )

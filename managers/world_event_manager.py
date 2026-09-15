@@ -135,11 +135,13 @@ class WorldEventManager:
         storage_ring_manager=None,
         death_manager=None,
         plugin_config=None,
+        equipment_manager=None,
     ):
         self.db = db
         self.config_manager = config_manager
         self.storage = storage_ring_manager
         self.death_manager = death_manager
+        self.equipment_manager = equipment_manager  # 装备管理器（用于战力计算）
         # AstrBot 插件配置面板（DEATH_CONFIG 同级的 WORLD_EVENT 分组）
         self._ai_generator = None  # AI 文案生成器（懒加载）
         self.plugin_config = plugin_config
@@ -889,6 +891,7 @@ class WorldEventManager:
            上限处的 ``1 - death_in_range_reduction``（默认只剩一半）
         4. 高于推荐上限：在 3 的基础上每高 1 级再乘 ``death_over_level_decay``（默认 0.6）
         5. 高出推荐上限达到 ``death_safe_level_gap`` 级（默认 6 级）时**完全免死**（返回 0）
+        6. 【新增】战力影响：根据玩家综合战力额外降低死亡率（装备、丹药buff都有效）
 
         返回 0 表示无论骰子如何都不会阵亡。
         """
@@ -922,10 +925,9 @@ class WorldEventManager:
                 DEFAULT_WORLD_EVENT_CONFIG["death_over_level_decay"],
             )
             decay = min(0.95, max(0.0, decay))
-            return self._clamp_rate(base * (1.0 - reduction) * (decay ** gap))
-
+            base_rate = base * (1.0 - reduction) * (decay ** gap)
         # 低于最低门槛：更危险
-        if min_level > 0 and level_index < min_level:
+        elif min_level > 0 and level_index < min_level:
             penalty = max(
                 0.0,
                 self._to_float(
@@ -933,16 +935,118 @@ class WorldEventManager:
                     DEFAULT_WORLD_EVENT_CONFIG["death_under_level_penalty"],
                 ),
             )
-            return self._clamp_rate(base + penalty)
-
+            base_rate = base + penalty
         # 模板未定义有效区间（max_level <= min_level）时不参与区间衰减
-        if max_level <= min_level:
-            return self._clamp_rate(base)
+        elif max_level <= min_level:
+            base_rate = base
+        else:
+            # 推荐区间内：境界越高死亡率越低
+            span = max(1, max_level - min_level)
+            position = min(1.0, max(0.0, (level_index - min_level) / span))
+            base_rate = base * (1.0 - reduction * position)
 
-        # 推荐区间内：境界越高死亡率越低
-        span = max(1, max_level - min_level)
-        position = min(1.0, max(0.0, (level_index - min_level) / span))
-        return self._clamp_rate(base * (1.0 - reduction * position))
+        # 【新增】战力影响死亡率：根据玩家综合战力额外降低死亡率
+        combat_reduction = self._calc_combat_power_reduction(player, level_index)
+        final_rate = base_rate * (1.0 - combat_reduction)
+
+        return self._clamp_rate(final_rate)
+
+    def _calc_combat_power_reduction(self, player: Player, level_index: int) -> float:
+        """根据玩家战力计算死亡率减免（装备、丹药buff都有效）
+
+        战力越高，死亡率额外降低越多，最多降低30%
+        计算方式：综合考虑攻击、防御、精神力相对于境界的提升程度
+        """
+        config = self._config()
+        # 可配置：是否启用战力影响（默认启用）
+        if not config.get("enable_combat_power_reduction", True):
+            return 0.0
+
+        # 获取玩家装备加成后的总属性（包含丹药buff）
+        try:
+            equipped_items = self._get_player_equipped_items(player)
+            pill_multipliers = self._get_player_pill_multipliers(player)
+            total_attrs = player.get_total_attributes(equipped_items, pill_multipliers)
+        except Exception as e:
+            logger.warning(f"[世界事件] 计算战力加成失败: {e}")
+            return 0.0
+
+        # 基准值：该境界的期望属性（粗略估算）
+        expected_base = 100 + level_index * 50  # 每级提升50点基础属性
+
+        # 综合战力：物攻、法攻、物防、法防、精神力的加权平均
+        total_attack = total_attrs.get("physical_damage", 0) + total_attrs.get("magic_damage", 0)
+        total_defense = total_attrs.get("physical_defense", 0) + total_attrs.get("magic_defense", 0)
+        mental = total_attrs.get("mental_power", 0)
+
+        # 计算战力相对提升率
+        combat_power = (total_attack * 0.4 + total_defense * 0.4 + mental * 0.2)
+        combat_ratio = combat_power / max(expected_base, 1)
+
+        # 战力提升比例 -> 死亡率减免（最多30%）
+        # 战力达到期望值2倍时减免15%，3倍时减免25%，4倍+时减免30%
+        max_reduction = config.get("combat_power_max_reduction", 0.30)  # 可配置最大减免
+        if combat_ratio >= 4.0:
+            return max_reduction
+        elif combat_ratio >= 3.0:
+            return max_reduction * 0.83  # 25%
+        elif combat_ratio >= 2.0:
+            return max_reduction * 0.50  # 15%
+        elif combat_ratio >= 1.5:
+            return max_reduction * 0.25  # 7.5%
+        else:
+            # 低于1.5倍标准战力，减免很少
+            return max(0.0, (combat_ratio - 1.0) * max_reduction * 0.2)
+
+    def _get_player_equipped_items(self, player: Player) -> List:
+        """获取玩家装备的物品列表（用于战力计算）"""
+        from ..models import Item
+
+        equipped = []
+        equipment_manager = getattr(self, "equipment_manager", None)
+        if not equipment_manager:
+            # 未注入装备管理器，返回空列表
+            return equipped
+
+        try:
+            # 获取武器
+            if player.weapon:
+                weapon = equipment_manager.get_equipment_by_name(player.weapon)
+                if weapon:
+                    equipped.append(weapon)
+
+            # 获取防具
+            if player.armor:
+                armor = equipment_manager.get_equipment_by_name(player.armor)
+                if armor:
+                    equipped.append(armor)
+
+            # 获取主修心法
+            if player.main_technique:
+                technique = equipment_manager.get_equipment_by_name(player.main_technique)
+                if technique:
+                    equipped.append(technique)
+
+            # 获取功法列表
+            for tech_name in player.get_techniques_list():
+                tech = equipment_manager.get_equipment_by_name(tech_name)
+                if tech:
+                    equipped.append(tech)
+        except Exception as e:
+            logger.warning(f"[世界事件] 获取装备列表失败: {e}")
+
+        return equipped
+
+    def _get_player_pill_multipliers(self, player: Player) -> dict:
+        """获取玩家当前丹药buff倍率（用于战力计算）"""
+        try:
+            from ..core.pill_manager import PillManager
+
+            pill_manager = PillManager(self.db, self.config_manager)
+            return pill_manager.get_active_multipliers(player)
+        except Exception as e:
+            logger.warning(f"[世界事件] 获取丹药buff失败: {e}")
+            return {}
 
     async def _apply_death(self, player: Player):
         """触发批次1 的死亡机制（未注入 DeathManager 时按规则兜底）"""

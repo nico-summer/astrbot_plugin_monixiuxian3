@@ -288,7 +288,8 @@ class XiuXianPlugin(Star):
         self.rank_mgr = RankingManager(self.db, self.combat_mgr, self.config_manager)
         self.death_mgr = DeathManager(self.db, self.config_manager, self.config)
         self.world_event_mgr = WorldEventManager(
-            self.db, self.config_manager, self.storage_ring_mgr, self.death_mgr, plugin_config=self.config
+            self.db, self.config_manager, self.storage_ring_mgr, self.death_mgr,
+            plugin_config=self.config, equipment_manager=self.equipment_mgr
         )
         self.alchemy_mgr = AlchemyManager(self.db, self.config_manager, self.storage_ring_mgr)
         # 委托炼丹（批次3）：炼丹师职业 + 玩家间委托炼丹
@@ -420,6 +421,7 @@ class XiuXianPlugin(Star):
         self.spirit_eye_task = asyncio.create_task(self._schedule_spirit_eye_spawn())
         self.bounty_check_task = asyncio.create_task(self._schedule_bounty_check())
         self.world_event_task = asyncio.create_task(self._schedule_world_event())
+        self.auto_revival_task = asyncio.create_task(self._schedule_auto_revival())
 
         logger.info("【修仙插件】已加载。")
 
@@ -434,6 +436,8 @@ class XiuXianPlugin(Star):
             self.world_event_task.cancel()
         if self.bounty_check_task:
             self.bounty_check_task.cancel()
+        if self.auto_revival_task:
+            self.auto_revival_task.cancel()
         await self.db.close()
         logger.info("【修仙插件】已卸载。")
 
@@ -948,6 +952,41 @@ class XiuXianPlugin(Star):
                 delay = min(60 * (2 ** retry_count), max_retry_delay)
                 logger.info(f"【修仙插件】世界事件任务将在 {delay} 秒后重试（第{retry_count}次）")
                 await asyncio.sleep(delay)
+
+    async def _schedule_auto_revival(self):
+        """自动复活检查定时任务（每5分钟检查一次）"""
+        while True:
+            try:
+                await self.db.ensure_connection()
+                await asyncio.sleep(300)  # 5分钟
+                await self._check_auto_revivals()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"自动复活检查任务异常: {e}")
+                await asyncio.sleep(60)
+
+    async def _check_auto_revivals(self):
+        """检查所有元神状态的玩家，到时间自动复活"""
+        try:
+            # 获取所有元神状态的玩家
+            cursor = await self.db.conn.execute(
+                "SELECT user_id FROM user_xiuxian WHERE is_soul_state = 1"
+            )
+            rows = await cursor.fetchall()
+
+            revived_count = 0
+            for row in rows:
+                user_id = row["user_id"]
+                player = await self.db.get_player_by_id(user_id)
+                if player and await self.death_mgr.check_auto_revival(player):
+                    revived_count += 1
+                    logger.info(f"玩家 {user_id} 已自动复活")
+
+            if revived_count > 0:
+                logger.info(f"【修仙插件】本次自动复活了 {revived_count} 位玩家")
+        except Exception as e:
+            logger.error(f"自动复活检查失败: {e}")
 
     async def _advance_world_events(self):
         """推进事件状态：报名截止自动开战、战斗结束自动结算，并广播到事件所在群"""
