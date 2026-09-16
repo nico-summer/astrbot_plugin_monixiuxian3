@@ -70,7 +70,7 @@ class EquipmentManager:
         # 旧格式兼容：处理类型映射
         # "法器" + subtype="武器" -> "weapon"
         # "法器" + subtype="防具" -> "armor"
-        # "法器" + subtype="饰品" -> "accessory" (暂不支持装备)
+        # "法器" + subtype="饰品" -> "accessory"
         if item_type == "法器":
             subtype = item_config.get("subtype", "")
             if subtype == "武器":
@@ -176,6 +176,12 @@ class EquipmentManager:
             if item:
                 equipped.append(item)
 
+        # 饰品
+        if player.accessory:
+            item = self.parse_item_from_name(player.accessory, items_data, weapons_data)
+            if item:
+                equipped.append(item)
+
         # 主修心法
         if player.main_technique:
             item = self.parse_item_from_name(player.main_technique, items_data, weapons_data)
@@ -266,6 +272,17 @@ class EquipmentManager:
             else:
                 return True, f"已装备防具【{item.name}】（{item.rank}）"
 
+        elif item.item_type == "accessory":
+            old_item = player.accessory
+            player.accessory = item.name
+            await self.db.update_player(player)
+            if old_item:
+                # 尝试将旧装备存入储物戒
+                storage_msg = await self._store_old_equipment(player, old_item)
+                return True, f"已将【{old_item}】替换为【{item.name}】（{item.rank}）{storage_msg}"
+            else:
+                return True, f"已装备饰品【{item.name}】（{item.rank}）"
+
         elif item.item_type == "main_technique":
             old_item = player.main_technique
             player.main_technique = item.name
@@ -323,6 +340,14 @@ class EquipmentManager:
             player.armor = ""
             await self.db.update_player(player)
             return True, f"已卸下防具【{item_name}】"
+
+        elif slot_or_name in ["饰品", "accessory"]:
+            if not player.accessory:
+                return False, "未装备饰品"
+            item_name = player.accessory
+            player.accessory = ""
+            await self.db.update_player(player)
+            return True, f"已卸下饰品【{item_name}】"
 
         elif slot_or_name in ["主修心法", "心法", "main_technique"]:
             if not player.main_technique:

@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 37  # v37: 爬塔系统（周榜）
+LATEST_DB_VERSION = 38  # v38: 饰品装备系统
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -851,6 +851,7 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
             
             weapon TEXT NOT NULL DEFAULT '',
             armor TEXT NOT NULL DEFAULT '',
+            accessory TEXT NOT NULL DEFAULT '',
             main_technique TEXT NOT NULL DEFAULT '',
             techniques TEXT NOT NULL DEFAULT '[]',
             
@@ -2015,3 +2016,26 @@ async def _migrate_to_v37(conn: aiosqlite.Connection, config_manager: ConfigMana
         logger.info("v37迁移完成：爬塔系统相关表已创建")
     else:
         logger.info("v37迁移完成：爬塔系统相关表已存在，无需变更")
+
+
+@migration(38)
+async def _migrate_to_v38(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v38 - 饰品装备系统
+
+    为 players 表添加 accessory 字段，支持饰品装备栏。
+    饰品属性（法伤/物伤/防御/精神力）自动计入战力系统。
+    """
+    logger.info("开始迁移到v38：饰品装备系统")
+
+    # 检查字段是否已存在
+    async with conn.execute("PRAGMA table_info(players)") as cursor:
+        columns = {row[1] for row in await cursor.fetchall()}
+
+    if "accessory" not in columns:
+        await conn.execute("ALTER TABLE players ADD COLUMN accessory TEXT NOT NULL DEFAULT ''")
+        logger.info("已为 players 表添加 accessory 字段")
+    else:
+        logger.info("accessory 字段已存在，跳过")
+
+    await conn.commit()
+    logger.info("v38迁移完成：饰品装备系统已启用")

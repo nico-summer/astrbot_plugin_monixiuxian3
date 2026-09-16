@@ -79,6 +79,7 @@ class Player:
     # 装备栏
     weapon: str = ""  # 武器
     armor: str = ""  # 防具
+    accessory: str = ""  # 饰品
     main_technique: str = ""  # 主修心法
     techniques: str = "[]"  # 功法列表（JSON字符串，最多3个）
 
