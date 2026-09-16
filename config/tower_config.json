@@ -1,0 +1,71 @@
+{
+  "tower_config": {
+    "total_floors": 100,
+    "floor_rewards": {
+      "spirit_stone_per_floor": 500,
+      "exp_per_floor": 2000
+    },
+    "milestone_rewards": {
+      "10": {
+        "spirit_stone": 20000,
+        "equipment_rank": "天品"
+      },
+      "20": {
+        "spirit_stone": 80000,
+        "equipment_rank": "皇品"
+      },
+      "30": {
+        "spirit_stone": 200000,
+        "equipment_rank": "皇品"
+      },
+      "40": {
+        "spirit_stone": 500000,
+        "equipment_rank": "帝品"
+      },
+      "50": {
+        "spirit_stone": 1200000,
+        "equipment_rank": "帝品",
+        "title": "登峰造极"
+      },
+      "60": {
+        "spirit_stone": 2500000,
+        "equipment_rank": "道品"
+      },
+      "70": {
+        "spirit_stone": 5000000,
+        "equipment_rank": "道品"
+      },
+      "80": {
+        "spirit_stone": 10000000,
+        "equipment_rank": "仙品"
+      },
+      "90": {
+        "spirit_stone": 20000000,
+        "equipment_rank": "仙品",
+        "title": "通天彻地"
+      },
+      "100": {
+        "spirit_stone": 50000000,
+        "equipment_rank": "神品",
+        "title": "万古第一"
+      }
+    },
+    "floor_power_requirements": {
+      "1": 100,
+      "10": 1500,
+      "20": 8000,
+      "30": 30000,
+      "40": 80000,
+      "50": 150000,
+      "60": 350000,
+      "70": 800000,
+      "80": 2000000,
+      "90": 3500000,
+      "100": 5000000
+    },
+    "weekly_reset": {
+      "enabled": true,
+      "reset_day": 1
+    }
+  }
+}

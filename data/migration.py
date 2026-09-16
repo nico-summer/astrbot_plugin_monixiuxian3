@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 36  # v36: 世界事件（替代历练系统）+ 清理历练遗留状态
+LATEST_DB_VERSION = 37  # v37: 爬塔系统（周榜）
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -1948,3 +1948,70 @@ async def _migrate_to_v36(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await clear_legacy_adventure_state(conn)
     await conn.commit()
+
+
+# 爬塔系统表
+TOWER_RECORDS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS tower_records (
+        user_id TEXT NOT NULL PRIMARY KEY,
+        max_floor INTEGER NOT NULL DEFAULT 0,
+        last_challenge_time INTEGER NOT NULL DEFAULT 0,
+        total_spirit_stone INTEGER NOT NULL DEFAULT 0,
+        total_exp INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+    )
+"""
+
+# 系统配置表（用于存储周期标识等全局状态）
+SYSTEM_CONFIG_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS system_config (
+        key TEXT NOT NULL PRIMARY KEY,
+        value TEXT NOT NULL,
+        update_time INTEGER NOT NULL DEFAULT 0
+    )
+"""
+
+
+async def repair_tower_tables(conn: aiosqlite.Connection) -> bool:
+    """确保爬塔相关表存在（幂等）
+
+    Returns:
+        True 表示至少创建了一张表，False 表示表已存在
+    """
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('tower_records', 'system_config')"
+    ) as cursor:
+        existing = {row[0] for row in await cursor.fetchall()}
+
+    created = False
+
+    if "tower_records" not in existing:
+        await conn.execute(TOWER_RECORDS_TABLE_SQL)
+        logger.info("已创建 tower_records 表")
+        created = True
+
+    if "system_config" not in existing:
+        await conn.execute(SYSTEM_CONFIG_TABLE_SQL)
+        logger.info("已创建 system_config 表")
+        created = True
+
+    return created
+
+
+@migration(37)
+async def _migrate_to_v37(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v37 - 爬塔系统
+
+    新增表：
+    - tower_records：玩家爬塔记录（最高层数 / 累计奖励）
+    - system_config：系统配置表（用于存储周榜周期标识）
+    """
+    logger.info("开始迁移到v37：爬塔系统（周榜）")
+
+    created = await repair_tower_tables(conn)
+    await conn.commit()
+
+    if created:
+        logger.info("v37迁移完成：爬塔系统相关表已创建")
+    else:
+        logger.info("v37迁移完成：爬塔系统相关表已存在，无需变更")

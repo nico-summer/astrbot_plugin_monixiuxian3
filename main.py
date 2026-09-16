@@ -16,7 +16,7 @@ from .handlers import (
     RiftHandlers, WorldEventHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
     BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
-    CommissionHandlers, MentorshipHandlers, TeamHandlers, RevivalHandler,
+    CommissionHandlers, MentorshipHandlers, TeamHandlers, RevivalHandler, TowerHandlers,
 )
 # 管理员功能（批次5）
 from .handlers.admin_handlers import AdminHandlers
@@ -25,7 +25,7 @@ from .managers import (
     RankingManager, WorldEventManager, AlchemyManager, ImpartManager,
     BankManager, BountyManager, ImpartPkManager,
     BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager,
-    MentorshipManager, TeamManager, CommissionManager
+    MentorshipManager, TeamManager, CommissionManager, TowerManager,
 )
 # 委托炼丹（批次3）：指令名统一定义在 handlers/commission_handlers.py，
 # 保证「注册指令名」与「参数解析用的指令名」始终一致
@@ -38,6 +38,10 @@ from .handlers.commission_handlers import (
 # 保证「注册指令名」与「提示文案里的指令名」始终一致
 from .handlers.world_event_handlers import (
     CMD_WORLD_EVENT, CMD_JOIN_WORLD_EVENT, CMD_LEAVE_WORLD_EVENT, CMD_WORLD_EVENT_RECORD,
+)
+# 爬塔系统：指令名统一定义在 handlers/tower_handlers.py
+from .handlers.tower_handlers import (
+    CMD_TOWER_INFO, CMD_TOWER_CHALLENGE, CMD_TOWER_RANKING,
 )
 
 
@@ -291,6 +295,9 @@ class XiuXianPlugin(Star):
             self.db, self.config_manager, self.storage_ring_mgr, self.death_mgr,
             plugin_config=self.config, equipment_manager=self.equipment_mgr
         )
+        self.tower_mgr = TowerManager(
+            self.db, self.config_manager, self.storage_ring_mgr, self.equipment_mgr
+        )
         self.alchemy_mgr = AlchemyManager(self.db, self.config_manager, self.storage_ring_mgr)
         # 委托炼丹（批次3）：炼丹师职业 + 玩家间委托炼丹
         self.commission_mgr = CommissionManager(
@@ -305,6 +312,7 @@ class XiuXianPlugin(Star):
         self.ranking_handlers = RankingHandlers(self.db, self.rank_mgr)
         self.rift_handlers = RiftHandlers(self.db, self.rift_mgr)
         self.world_event_handlers = WorldEventHandlers(self.db, self.world_event_mgr)
+        self.tower_handlers = TowerHandlers(self.db, self.tower_mgr)
 
         # 管理员处理器（批次5）
         self.admin_handlers = AdminHandlers(
@@ -1803,6 +1811,26 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_world_event_record(self, event: AstrMessageEvent):
         async for r in self.world_event_handlers.handle_record(event):
+            yield r
+
+    # ==================== 爬塔系统 ====================
+
+    @filter.command(CMD_TOWER_INFO, "查看爬塔进度和战力")
+    @require_whitelist
+    async def handle_tower_info(self, event: AstrMessageEvent):
+        async for r in self.tower_handlers.handle_info(event):
+            yield r
+
+    @filter.command(CMD_TOWER_CHALLENGE, "挑战爬塔")
+    @require_whitelist
+    async def handle_tower_challenge(self, event: AstrMessageEvent):
+        async for r in self.tower_handlers.handle_challenge(event):
+            yield r
+
+    @filter.command(CMD_TOWER_RANKING, "查看爬塔周榜")
+    @require_whitelist
+    async def handle_tower_ranking(self, event: AstrMessageEvent):
+        async for r in self.tower_handlers.handle_ranking(event):
             yield r
 
     # ==================== 管理员指令（批次5，仅私聊） ====================

@@ -30,6 +30,7 @@ from .spirit_eye_handlers import SpiritEyeHandlers
 from .mentorship_handlers import MentorshipHandlers
 from .team_handlers import TeamHandlers
 from .revival_handler import RevivalHandler
+from .tower_handlers import TowerHandlers
 
 __all__ = [
     "PlayerHandler",
@@ -61,4 +62,5 @@ __all__ = [
     "MentorshipHandlers",
     "TeamHandlers",
     "RevivalHandler",
+    "TowerHandlers",
 ]
