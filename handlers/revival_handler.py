@@ -1,7 +1,7 @@
 # handlers/revival_handler.py
 """复活系统处理器（批次1：死亡机制重构）
 
-负责元神状态的查询、自然复活、还魂丹复活与超时强制复活。
+负责元神状态的查询、自然复活、还魂丹复活。
 所有时间 / 比例参数均来自配置（config/death_config.json），方便后期调整平衡。
 
 指令入口见 main.py：
@@ -24,11 +24,7 @@ DEFAULT_DEATH_CONFIG = {
     "soul_revival_hours": 24,
     "soul_exp_loss_rate": 0.05,
     "rebirth_exp_keep_rate": 0.7,
-    "soul_exp_decay_per_hour": 0.01,
 }
-
-# 超过复活时间的该倍数仍未复活 -> 修为完全流失，强制复活
-FORCE_REVIVE_MULTIPLIER = 4
 
 SEP = "━━━━━━━━━━━━━━━"
 
@@ -50,9 +46,6 @@ class RevivalHandler:
         )
         self.rebirth_exp_keep_rate = self._to_float(
             death_config.get("rebirth_exp_keep_rate"), DEFAULT_DEATH_CONFIG["rebirth_exp_keep_rate"]
-        )
-        self.decay_per_hour = self._to_float(
-            death_config.get("soul_exp_decay_per_hour"), DEFAULT_DEATH_CONFIG["soul_exp_decay_per_hour"]
         )
 
     # ===== 配置 =====
@@ -146,20 +139,13 @@ class RevivalHandler:
         elapsed_hours = elapsed_seconds / 3600
 
         remaining_hours = max(0.0, self.revival_hours - elapsed_hours)
-        max_wait_hours = self.revival_hours * FORCE_REVIVE_MULTIPLIER
-
-        # 修为流失比例（每小时流失，超过100%按100%计）
-        decay_percent = min(100.0, elapsed_hours * self.decay_per_hour * 100)
 
         return {
             "elapsed_hours": elapsed_hours,
             "remaining_hours": remaining_hours,
             "elapsed_text": self.format_duration(elapsed_hours),
             "remaining_text": self.format_duration(remaining_hours),
-            "decay_percent": decay_percent,
-            "max_wait_hours": max_wait_hours,
             "can_natural_revival": elapsed_hours >= self.revival_hours,
-            "force_revive": elapsed_hours >= max_wait_hours,
         }
 
     def check_soul_state(self, player: Player) -> str:
@@ -173,21 +159,25 @@ class RevivalHandler:
 
         progress = self.get_soul_progress(player)
 
+        # 计算已损失的修为（死亡时扣除的5%）
+        exp_before = int(player.soul_exp_before_death or 0)
+        current_exp = int(player.experience or 0)
+        loss_percent = ((exp_before - current_exp) / exp_before * 100) if exp_before > 0 else 0
+
         lines = [
             f"{SEP} 元神状态 {SEP}",
             f"👻 {(player.user_name or player.user_id)}　境界保留",
             f"{SEP}",
             f"⏰ 已流逝：{progress['elapsed_text']}",
-            f"💫 每小时流失：{self.decay_per_hour:.1%} 修为（累计流失 {progress['decay_percent']:.1f}%）",
-            f"🕐 自然复活剩余：{progress['remaining_text']}",
-            f"⏳ 最长可支撑：{self.format_duration(progress['max_wait_hours'])}（超时修为归零强制复活）",
+            f"💀 死亡时损失：{loss_percent:.1f}% 修为（已扣除，不再流失）",
+            f"🕐 自动复活剩余：{progress['remaining_text']}",
             f"{SEP}",
             "💡 复活方式：",
-            f"1. 发送「自然复活」（需等待 {self.format_duration(self.revival_hours)}，永久损失 {self.exp_loss_rate:.0%} 修为）",
+            f"1. 自动复活（等待 {self.format_duration(self.revival_hours)}，系统自动复活）",
             "2. 使用还魂丹（立即复活，无修为损失，由炼丹师炼制）",
             "3. 宗门救援 / 师父救援（由宗主·长老或师父发起，完美复活）",
             f"{SEP}",
-            "⚠️ 元神状态下无法修炼与战斗，请尽快复活！",
+            "⚠️ 元神状态下无法修炼与战斗，请耐心等待复活！",
         ]
         return "\n".join(lines)
 
@@ -204,8 +194,7 @@ class RevivalHandler:
         Args:
             player: 玩家对象
             loss_rate: 永久损失的修为比例，默认取配置「soul_exp_loss_rate」
-            reason: 复活来源（natural=自然复活 / pill=还魂丹 / force=超时强制 /
-                rescue=宗门·师门救援）
+            reason: 复活来源（natural=自然复活 / pill=还魂丹 / rescue=宗门·师门救援）
 
         Returns:
             (是否复活成功, 消息)
@@ -218,10 +207,7 @@ class RevivalHandler:
         loss_rate = max(0.0, min(1.0, self._to_float(loss_rate, self.exp_loss_rate)))
 
         exp_before = int(player.soul_exp_before_death or player.experience or 0)
-        if reason == "force":
-            restored_exp = 0
-        else:
-            restored_exp = int(exp_before * (1 - loss_rate))
+        restored_exp = int(exp_before * (1 - loss_rate))
 
         player.is_soul_state = False
         player.experience = max(0, restored_exp)
@@ -234,14 +220,6 @@ class RevivalHandler:
             f"[复活系统] 玩家 {player.user_id} 复活（来源：{reason}），"
             f"修为 {exp_before} -> {player.experience}（损失 {loss_rate:.1%}）"
         )
-
-        if reason == "force":
-            return True, (
-                "💀 元神消散时间过长...\n"
-                f"{SEP}\n"
-                "你的修为已完全流失，勉强重塑肉身复活\n"
-                "⚠️ 请尽快重新修炼！"
-            )
 
         if reason == "pill":
             return True, (
@@ -295,29 +273,6 @@ class RevivalHandler:
         由炼丹系统（批次2）在玩家服用还魂丹时调用。
         """
         return await self.revive_soul(player, loss_rate=0.0, reason="pill")
-
-    async def check_and_auto_revive(self, player: Player) -> Tuple[bool, str]:
-        """检查是否需要强制复活（超时未复活则修为归零并自动复活）
-
-        用于玩家每次操作前自动检测，避免玩家长期卡在元神状态。
-
-        Returns:
-            (是否已自动复活, 消息)
-        """
-        if not player.is_soul_state:
-            return False, ""
-
-        progress = self.get_soul_progress(player)
-        if not progress["force_revive"]:
-            return False, ""
-
-        await self.revive_soul(player, loss_rate=1.0, reason="force")
-        return True, (
-            "💀 元神消散时间过长...\n"
-            f"{SEP}\n"
-            "你的修为已完全流失，勉强复活\n"
-            "⚠️ 请尽快重新修炼！"
-        )
 
     # ===== 还魂丹（批次2：炼丹系统升级） =====
 

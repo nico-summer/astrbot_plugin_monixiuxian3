@@ -275,22 +275,16 @@ def get_soul_state_block_message(message_text: str) -> str:
 
 
 async def _auto_revive_soul_state(db, player: Player) -> tuple:
-    """超时未复活的元神玩家自动强制复活
+    """检查元神状态（已移除强制复活逻辑）
+
+    注意：强制复活（修为归0）已在v3.9.2中移除。
+    现在由death_manager的自动复活定时任务处理，到时间自动复活且不归0。
 
     Returns:
-        (是否已自动复活, 消息)
+        (是否已自动复活, 消息) - 现在总是返回 (False, "")
     """
-    try:
-        from .revival_handler import RevivalHandler
-    except Exception:
-        return False, ""
-
-    try:
-        handler = RevivalHandler(db, config=get_soul_state_config())
-        return await handler.check_and_auto_revive(player)
-    except Exception as e:
-        logger.warning(f"[复活系统] 自动复活检查失败: {e}")
-        return False, ""
+    # v3.9.2: 移除强制归0逻辑，改为定时任务自动复活
+    return False, ""
 
 
 def player_required(func: Callable[..., Coroutine[any, any, AsyncGenerator[any, None]]]):
