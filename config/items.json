@@ -636,7 +636,11 @@
         "description": "由精铁打造的利剑，是修士入门的常用法器。",
         "price": 800,
         "equip_effects": {
-            "attack": 8
+            "attack": 8,
+            "magic_damage": 5,
+            "physical_damage": 10,
+            "physical_defense": 3,
+            "mental_power": 5
         },
         "shop_weight": 1000
     },
@@ -660,7 +664,11 @@
         "description": "刀身赤红，挥舞间似有烈阳之威。",
         "price": 4000,
         "equip_effects": {
-            "attack": 25
+            "attack": 25,
+            "magic_damage": 30,
+            "physical_damage": 40,
+            "physical_defense": 15,
+            "mental_power": 25
         },
         "shop_weight": 100
     },
@@ -685,7 +693,11 @@
         "description": "传说中的禁忌法器，枪出如龙，有弑神之威。",
         "price": 9999999,
         "equip_effects": {
-            "attack": 500
+            "attack": 850,
+            "magic_damage": 900,
+            "physical_damage": 1100,
+            "physical_defense": 400,
+            "mental_power": 950
         },
         "shop_weight": 20
     },
@@ -710,7 +722,11 @@
         "description": "剑身由玄冰之核打造，挥舞时可冰封百里。",
         "price": 600000,
         "equip_effects": {
-            "attack": 250
+            "attack": 250,
+            "magic_damage": 150,
+            "physical_damage": 130,
+            "physical_defense": 60,
+            "mental_power": 120
         },
         "shop_weight": 100
     },
@@ -735,7 +751,11 @@
         "description": "以月光粉尘和神木打造，箭矢能追踪敌人。",
         "price": 550000,
         "equip_effects": {
-            "attack": 220
+            "attack": 220,
+            "magic_damage": 180,
+            "physical_damage": 240,
+            "physical_defense": 80,
+            "mental_power": 160
         },
         "shop_weight": 100
     },
