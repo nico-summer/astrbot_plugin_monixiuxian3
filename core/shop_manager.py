@@ -860,20 +860,31 @@ class ShopManager:
         # 武器/防具/饰品属性
         if item_type in ['weapon', 'armor', 'accessory']:
             attrs = []
-            if data.get('magic_damage', 0) > 0:
-                attrs.append(f"法伤+{data['magic_damage']}")
-            if data.get('physical_damage', 0) > 0:
-                attrs.append(f"物伤+{data['physical_damage']}")
-            if data.get('magic_defense', 0) > 0:
-                attrs.append(f"法防+{data['magic_defense']}")
-            if data.get('physical_defense', 0) > 0:
-                attrs.append(f"物防+{data['physical_defense']}")
-            if data.get('mental_power', 0) > 0:
-                attrs.append(f"精神力+{data['mental_power']}")
-            if data.get('lifespan', 0) > 0:
-                attrs.append(f"寿命+{data['lifespan']}")
-            if data.get('blood_qi', 0) > 0:
-                attrs.append(f"气血+{data['blood_qi']}")
+            # 支持两种格式：直接属性（weapons.json）和 equip_effects（items.json）
+            equip_effects = data.get('equip_effects', {})
+
+            magic_dmg = equip_effects.get('magic_damage', 0) or data.get('magic_damage', 0)
+            physical_dmg = equip_effects.get('physical_damage', 0) or data.get('physical_damage', 0)
+            magic_def = equip_effects.get('magic_defense', 0) or data.get('magic_defense', 0)
+            physical_def = equip_effects.get('physical_defense', 0) or data.get('physical_defense', 0)
+            mental_pwr = equip_effects.get('mental_power', 0) or data.get('mental_power', 0)
+            lifespan_bonus = data.get('lifespan', 0)
+            blood_qi_bonus = data.get('blood_qi', 0)
+
+            if magic_dmg > 0:
+                attrs.append(f"法伤+{magic_dmg}")
+            if physical_dmg > 0:
+                attrs.append(f"物伤+{physical_dmg}")
+            if magic_def > 0:
+                attrs.append(f"法防+{magic_def}")
+            if physical_def > 0:
+                attrs.append(f"物防+{physical_def}")
+            if mental_pwr > 0:
+                attrs.append(f"精神力+{mental_pwr}")
+            if lifespan_bonus > 0:
+                attrs.append(f"寿命+{lifespan_bonus}")
+            if blood_qi_bonus > 0:
+                attrs.append(f"气血+{blood_qi_bonus}")
             if attrs:
                 details.append(f"属性: {', '.join(attrs)}")
             if 'required_level_index' in data:

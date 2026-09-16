@@ -122,8 +122,8 @@ class EquipmentHandler:
             )
             return
 
-        if item.item_type not in {"weapon", "armor", "main_technique", "technique"}:
-            yield event.plain_result(f"【{item_name}】暂不支持装备（饰品暂未开放独立装备栏）")
+        if item.item_type not in {"weapon", "armor", "accessory", "main_technique", "technique"}:
+            yield event.plain_result(f"【{item_name}】暂不支持装备")
             return
 
         # 检查储物戒中是否有该物品

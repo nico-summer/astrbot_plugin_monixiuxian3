@@ -693,11 +693,11 @@
         "description": "传说中的禁忌法器，枪出如龙，有弑神之威。",
         "price": 9999999,
         "equip_effects": {
-            "attack": 850,
-            "magic_damage": 900,
-            "physical_damage": 1100,
-            "physical_defense": 400,
-            "mental_power": 950
+            "attack": 1500,
+            "magic_damage": 1600,
+            "physical_damage": 2000,
+            "physical_defense": 800,
+            "mental_power": 1800
         },
         "shop_weight": 20
     },

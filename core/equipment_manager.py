@@ -59,13 +59,23 @@ class EquipmentManager:
         # 旧格式兼容：处理 items.json 中的法器（equip_effects 格式）
         if "equip_effects" in item_config:
             equip_effects = item_config.get("equip_effects") or {}
-            # 旧格式 attack -> physical_damage
-            if "attack" in equip_effects:
+            # 优先使用 equip_effects 中的属性
+            if "magic_damage" in equip_effects:
+                magic_damage = equip_effects["magic_damage"]
+            if "physical_damage" in equip_effects:
+                physical_damage = equip_effects["physical_damage"]
+            if "magic_defense" in equip_effects:
+                magic_defense = equip_effects["magic_defense"]
+            if "physical_defense" in equip_effects:
+                physical_defense = equip_effects["physical_defense"]
+            if "mental_power" in equip_effects:
+                mental_power = equip_effects["mental_power"]
+            # 旧格式 attack -> physical_damage（如果没有 physical_damage）
+            if "attack" in equip_effects and physical_damage == 0:
                 physical_damage = equip_effects["attack"]
-            # 旧格式 defense -> physical_defense
-            if "defense" in equip_effects:
+            # 旧格式 defense -> physical_defense（如果没有 physical_defense）
+            if "defense" in equip_effects and physical_defense == 0:
                 physical_defense = equip_effects["defense"]
-            # 旧格式 max_hp 可用于体修的 blood_qi 加成
 
         # 旧格式兼容：处理类型映射
         # "法器" + subtype="武器" -> "weapon"
