@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 38  # v38: 饰品装备系统
+LATEST_DB_VERSION = 39  # v39: 爬塔每日挑战次数限制
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -2039,3 +2039,41 @@ async def _migrate_to_v38(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v38迁移完成：饰品装备系统已启用")
+
+
+# 爬塔每日挑战次数表
+TOWER_DAILY_CHALLENGES_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS tower_daily_challenges (
+        user_id TEXT NOT NULL,
+        challenge_date TEXT NOT NULL,
+        challenge_count INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, challenge_date),
+        FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
+    )
+"""
+
+
+@migration(39)
+async def _migrate_to_v39(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v39 - 爬塔每日挑战次数限制
+
+    新增表：
+    - tower_daily_challenges：记录玩家每日挑战次数
+    """
+    logger.info("开始迁移到v39：爬塔每日挑战次数限制")
+
+    # 检查表是否存在
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='tower_daily_challenges'"
+    ) as cursor:
+        existing = await cursor.fetchone()
+
+    if not existing:
+        await conn.execute(TOWER_DAILY_CHALLENGES_TABLE_SQL)
+        logger.info("已创建 tower_daily_challenges 表")
+    else:
+        logger.info("tower_daily_challenges 表已存在，跳过")
+
+    await conn.commit()
+    logger.info("v39迁移完成：爬塔每日挑战次数限制已启用")
+

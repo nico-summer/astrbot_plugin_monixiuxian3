@@ -102,6 +102,10 @@ class TowerManager:
             "exp_per_floor": 2000
         })
 
+    def _daily_challenge_limit(self) -> int:
+        """每日挑战次数限制"""
+        return int(self._config().get("daily_challenge_limit", 1))
+
     # ==================== 战力计算 ====================
 
     def calculate_combat_power(self, player: Player) -> int:
@@ -229,6 +233,18 @@ class TowerManager:
         # 检查周榜重置
         await self.check_and_reset_weekly()
 
+        # 检查每日挑战次数
+        daily_limit = self._daily_challenge_limit()
+        today_count = await self._get_today_challenge_count(player.user_id)
+        if today_count >= daily_limit:
+            return False, (
+                f"⚠️ 今日挑战次数已用完\n"
+                f"{SEP}\n"
+                f"💡 每日可挑战次数：{daily_limit}\n"
+                f"💡 已挑战次数：{today_count}\n"
+                f"💡 明天再来吧！"
+            )
+
         # 计算玩家战力
         combat_power = self.calculate_combat_power(player)
 
@@ -260,6 +276,9 @@ class TowerManager:
 
         # 更新记录
         await self._update_tower_record(player.user_id, max_floor, rewards)
+
+        # 记录今日挑战次数
+        await self._increment_today_challenge_count(player.user_id)
 
         # 生成结果消息
         msg = self._format_challenge_result(
@@ -397,6 +416,41 @@ class TowerManager:
 
     # ==================== 数据库操作 ====================
 
+    async def _get_today_challenge_count(self, user_id: str) -> int:
+        """获取玩家今日挑战次数"""
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            async with self.db.conn.execute(
+                """
+                SELECT challenge_count FROM tower_daily_challenges
+                WHERE user_id = ? AND challenge_date = ?
+                """,
+                (str(user_id), today)
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            return row["challenge_count"] if row else 0
+        except Exception as e:
+            logger.warning(f"[爬塔] 查询今日挑战次数失败: {e}")
+            return 0
+
+    async def _increment_today_challenge_count(self, user_id: str):
+        """增加玩家今日挑战次数"""
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            await self.db.conn.execute(
+                """
+                INSERT INTO tower_daily_challenges (user_id, challenge_date, challenge_count)
+                VALUES (?, ?, 1)
+                ON CONFLICT(user_id, challenge_date)
+                DO UPDATE SET challenge_count = challenge_count + 1
+                """,
+                (str(user_id), today)
+            )
+            await self.db.conn.commit()
+        except Exception as e:
+            logger.error(f"[爬塔] 更新今日挑战次数失败: {e}")
+
     async def _get_tower_record(self, user_id: str) -> Optional[dict]:
         """获取玩家爬塔记录"""
         try:
@@ -464,16 +518,24 @@ class TowerManager:
         current_max = record.get("max_floor", 0) if record else 0
         max_reachable = self._calculate_max_floor(combat_power)
 
+        # 获取今日挑战次数
+        daily_limit = self._daily_challenge_limit()
+        today_count = await self._get_today_challenge_count(player.user_id)
+        remaining = daily_limit - today_count
+
         lines = [
             "🗼 爬塔系统",
             SEP,
             f"⚔️ 当前战力：{combat_power:,}",
             f"🏆 最高记录：第 {current_max} 层",
             f"📊 可挑战至：第 {max_reachable} 层",
+            f"🎫 今日剩余次数：{remaining}/{daily_limit}",
             SEP,
         ]
 
-        if max_reachable > current_max:
+        if remaining <= 0:
+            lines.append("⚠️ 今日挑战次数已用完，明天再来吧！")
+        elif max_reachable > current_max:
             lines.append(f"✅ 可以挑战更高层数！发送「挑战爬塔」开始")
         else:
             next_floor = current_max + 1

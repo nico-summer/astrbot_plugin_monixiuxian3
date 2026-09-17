@@ -66,6 +66,7 @@
     "weekly_reset": {
       "enabled": true,
       "reset_day": 1
-    }
+    },
+    "daily_challenge_limit": 1
   }
 }
