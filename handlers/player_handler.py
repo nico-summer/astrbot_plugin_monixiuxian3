@@ -233,11 +233,17 @@ class PlayerHandler:
                 config_manager=self.config_manager,
             )
             progress = revival.get_soul_progress(player)
+
+            # 计算死亡时已损失的修为百分比（用于显示）
+            exp_before = int(player.soul_exp_before_death or 0)
+            current_exp = int(player.experience or 0)
+            loss_percent = ((exp_before - current_exp) / exp_before * 100) if exp_before > 0 else 0
+
             reply_msg += (
                 f"\n"
                 f"【元神状态】👻\n"
                 f"  ⏰ 已流逝：{progress['elapsed_text']}\n"
-                f"  💫 修为流失：{progress['decay_percent']:.1f}%\n"
+                f"  💀 死亡时已损失：{loss_percent:.1f}% 修为\n"
                 f"  🕐 自然复活剩余：{progress['remaining_text']}\n"
                 f"  ⚠️ 元神状态无法修炼与战斗\n"
                 f"  💡 发送「元神状态」查看详情，「自然复活」期满后复活\n"
