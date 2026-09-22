@@ -11,8 +11,17 @@
   高出事件推荐上限一个大境界后**完全免死**（v3.10.0 小说化模型：最终死亡率 = 基准 × 境界优势 × 战力优势），
   不会再出现炼虚期修士被低阶妖兽围城骰死的情况
 - v3.9.1 起持有「回生丹」的玩家阵亡时优先被丹药抵消（与突破走火入魔同逻辑）
-- 幸存者拿全额奖励，阵亡者按 death_penalty_reward_rate（默认 20%）结算
+- 幸存者拿全额奖励，阵亡者按 death_penalty_reward_rate（v3.11.0 默认 50%）结算
 - 奖励含稀有炼丹材料（九转仙草 / 太古龙骨 / 灵髓精华 / 月华精粹），用于炼制还魂丹
+- v3.11.0 奖励重构（玩家反馈「顶着死亡风险只掉俩魔核」）：
+  1. **数值随境界成长**：修为/灵石以模板的 ``reward_ref_level`` 为基准，玩家每高
+     1 个小境界 ×``reward_level_growth``（默认 1.35，上限 ``reward_max_multiplier``）。
+     此前是固定区间，导致高境界玩家打事件只拿同境界秘境的 1/3~1/40。
+  2. **材料必掉保底**：每场至少掉 ``reward_guaranteed_material``（默认 1）件材料，
+     材料支持 ``count`` 数量区间（如 灵髓精华 ×2~3），还魂丹材料成型速度提升约 2 倍。
+  3. **阵亡代价下调**：阵亡奖励保留比例默认 20% → 50%，且事件阵亡的修为损失按
+     ``death_exp_loss_scale``（默认 0.5）打折，避免「为了复活道具进副本，结果先把
+     修为赔光」。
 - v3.10.0 起战斗过程可见：报名截止开战后，战斗按时长拆成 3~5 个节点逐段推进，
   每个节点独立掷骰并实时播报战况。每节点死亡率取 ``1 - (1 - p) ** (1 / N)``，
   因此**整场死亡率与旧版完全一致**，只是把一次骰子摊成了可见的若干次。
@@ -23,6 +32,7 @@ import asyncio
 import json
 import random
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -59,6 +69,11 @@ PLUGIN_KEY_MAP = {
     "BATTLE_PROCESS_ENABLED": "battle_process_enabled",
     "BATTLE_NODE_COUNT": "battle_node_count",
     "BATTLE_BROADCAST_MIN_PARTICIPANTS": "battle_broadcast_min_participants",
+    # v3.11.0 奖励重构：奖励随境界成长 + 阵亡修为损失折扣
+    "REWARD_LEVEL_SCALING": "reward_level_scaling",
+    "REWARD_LEVEL_GROWTH": "reward_level_growth",
+    "REWARD_MAX_MULTIPLIER": "reward_max_multiplier",
+    "DEATH_EXP_LOSS_SCALE": "death_exp_loss_scale",
     "BROADCAST_GROUPS": "broadcast_groups",
     "ADMIN_USERS": "admin_users",
 }
@@ -476,6 +491,10 @@ class WorldEventManager:
             index = 0
         if 0 <= index < len(level_data):
             return level_data[index].get("level_name", f"境界{index}")
+        if index >= len(level_data) and level_data:
+            # 模板的 max_level 允许写成「上限开区间」（如史诗 36 = 境界表末尾之后再无更高档），
+            # 展示时钳到最后一档，避免面板里出现「境界36」这种生造名词
+            return level_data[-1].get("level_name", f"境界{index}")
         return f"境界{index}"
 
     # ==================== 装备掉落配置 ====================
@@ -990,12 +1009,14 @@ class WorldEventManager:
             return False, "⚠️ 你已经报名了本次世界事件"
 
         current_count = len(participants) + 1
+        preview = self.describe_reward_preview(player, event_data)
         return True, (
             f"✅ 报名成功！你已加入【{event_data.get('name', '世界事件')}】\n"
             f"{SEP}\n"
             f"👥 当前报名人数：{current_count}/{max_participants}\n"
             f"{self.describe_risk_breakdown(player, event_data)}\n"
-            f"⏰ 报名截止后将自动开战，请留意群消息"
+            + (f"{SEP}\n{preview}\n" if preview else "")
+            + "⏰ 报名截止后将自动开战，请留意群消息"
         )
 
     async def leave_event(self, player: Player, event_id) -> Tuple[bool, str]:
@@ -1419,15 +1440,26 @@ class WorldEventManager:
             return {}
 
     async def _apply_death(self, player: Player):
-        """触发批次1 的死亡机制（未注入 DeathManager 时按规则兜底）"""
+        """触发批次1 的死亡机制（未注入 DeathManager 时按规则兜底）
+
+        v3.11.0：世界事件阵亡按 ``death_exp_loss_scale`` 打折修为损失。境界与状态
+        判定（劫后重生 / 元神 / 彻底陨落）完全沿用常规规则，只是把「死亡代价」调轻，
+        让「进来刷复活道具材料」这件事不再天然亏修为。
+        """
+        scale = self._to_float(
+            self._config().get("death_exp_loss_scale"),
+            DEFAULT_WORLD_EVENT_CONFIG["death_exp_loss_scale"],
+        )
+        scale = max(0.0, min(1.0, scale))
+
         if self.death_manager is not None:
-            return await self.death_manager.apply_death(player)
+            return await self.death_manager.apply_death(player, exp_loss_scale=scale)
 
         # 兜底：DeathManager 未注入时按相同规则处理，避免事件结算失败
         from ..core.death_manager import DeathManager
 
         fallback = DeathManager(self.db, self.config_manager)
-        return await fallback.apply_death(player)
+        return await fallback.apply_death(player, exp_loss_scale=scale)
 
     async def _try_resurrect_pill(self, player: Player) -> bool:
         """阵亡瞬间检查「回生丹」是否抵消本次死亡
@@ -1451,8 +1483,152 @@ class WorldEventManager:
             logger.info(f"[世界事件] 玩家 {player.user_id} 触发回生丹，抵消本次阵亡")
         return bool(resurrected)
 
-    def _calculate_rewards(self, event_data: dict, multiplier: float) -> dict:
-        """按事件模板随机计算奖励（multiplier 已包含阵亡惩罚比例）"""
+    # ==================== 奖励重构（v3.11.0） ====================
+
+    def _reward_ref_level(self, event_data: dict) -> int:
+        """奖励基准境界：模板优先取 ``reward_ref_level``，缺省取推荐区间中点"""
+        explicit = (event_data or {}).get("reward_ref_level")
+        if explicit is not None:
+            try:
+                return int(explicit)
+            except (TypeError, ValueError):
+                pass
+        min_level = self._to_int((event_data or {}).get("min_level"), 0)
+        max_level = self._to_int((event_data or {}).get("max_level"), min_level)
+        return (min_level + max_level) // 2
+
+    def _reward_scale_for_player(self, player: Player, event_data: dict) -> float:
+        """境界成长倍率：玩家每高出基准境界 1 级，修为/灵石奖励乘一个系数
+
+        事件模板里的修为/灵石区间是「基准境界处」的数值，高境界玩家不再拿同一份
+        固定奖励（这正是「合体期打事件只得同境界秘境 1/30」的根因）。
+        低于基准境界不减益（保底 1.0），并受 ``reward_max_multiplier`` 封顶。
+        """
+        config = self._config()
+        if not config.get("reward_level_scaling", True):
+            return 1.0
+
+        level_index = self._to_int(getattr(player, "level_index", 0), 0)
+        gap = level_index - self._reward_ref_level(event_data)
+        if gap <= 0:
+            return 1.0
+
+        # 成长系数：模板级 reward_level_growth 优先，缺省用全局配置
+        # （各难度区间的秘境曲线斜率不同，模板级覆盖能让收益贴合同境界秘境）
+        raw_growth = (event_data or {}).get("reward_level_growth")
+        if raw_growth is None:
+            raw_growth = config.get("reward_level_growth")
+        growth = self._to_float(
+            raw_growth,
+            DEFAULT_WORLD_EVENT_CONFIG["reward_level_growth"],
+        )
+        growth = max(1.0, min(3.0, growth))
+        cap = self._to_float(
+            config.get("reward_max_multiplier"),
+            DEFAULT_WORLD_EVENT_CONFIG["reward_max_multiplier"],
+        )
+        cap = max(1.0, cap)
+        return min(cap, growth ** gap)
+
+    @classmethod
+    def _reward_range(cls, template_rewards: dict, key: str) -> Tuple[int, int]:
+        """读取模板里的区间字段（自动纠正颠倒的上下限）"""
+        value = (template_rewards or {}).get(key)
+        if not isinstance(value, (list, tuple)) or len(value) < 2:
+            return 0, 0
+        low, high = cls._to_int(value[0], 0), cls._to_int(value[1], 0)
+        if high < low:
+            low, high = high, low
+        return max(0, low), max(0, high)
+
+    @classmethod
+    def _material_count(cls, material: dict) -> int:
+        """单次掉落的材料数量：支持 int 或 [min, max] 区间，非法值回退 1"""
+        raw = (material or {}).get("count", 1)
+        if isinstance(raw, (list, tuple)):
+            if len(raw) < 2:
+                return 1
+            low, high = cls._to_int(raw[0], 1), cls._to_int(raw[1], 1)
+            low, high = max(1, min(low, high)), max(1, max(low, high))
+            return random.randint(low, high)
+        return max(1, cls._to_int(raw, 1))
+
+    @staticmethod
+    def _format_amount(value) -> str:
+        """把大数字打成「万 / 亿」，方便在事件面板里一眼看清收益量级"""
+        try:
+            amount = int(value)
+        except (TypeError, ValueError):
+            return "0"
+        if abs(amount) >= 100_000_000:
+            return f"{amount / 100_000_000:.2f}".rstrip("0").rstrip(".") + "亿"
+        if abs(amount) >= 10_000:
+            return f"{amount / 10_000:.1f}".rstrip("0").rstrip(".") + "万"
+        return f"{amount:,}"
+
+    def describe_reward_preview(self, player: Player, event_data: dict) -> str:
+        """个人「预估收益」文案（含生还 / 期望两档，v3.11.0）
+
+        玩家反馈的核心是「算不清值不值得去」。这里把生还收益与折算风险后的期望收益
+        直接摆出来，让「值不值」变成一次心算就能判断的事。
+        """
+        template_rewards = (event_data or {}).get("rewards") or {}
+        scale = self._reward_scale_for_player(player, event_data)
+        exp_low, exp_high = self._reward_range(template_rewards, "exp")
+        stone_low, stone_high = self._reward_range(template_rewards, "spirit_stone")
+        base_multiplier = self._to_float((event_data or {}).get("reward_multiplier"), 1.0)
+
+        if not (exp_high or stone_high):
+            return ""
+
+        retain = self._to_float(
+            self._config().get("death_penalty_reward_rate"),
+            DEFAULT_WORLD_EVENT_CONFIG["death_penalty_reward_rate"],
+        )
+        retain = max(0.0, min(1.0, retain))
+        detail = self._calc_death_rate_detail(
+            player,
+            self._to_float((event_data or {}).get("base_death_rate"), 0.0),
+            self._to_int((event_data or {}).get("min_level"), 0),
+            self._to_int((event_data or {}).get("max_level"), 0),
+        )
+        # 期望系数 = 生还概率 × 1 + 阵亡概率 × 阵亡保留比例
+        death_rate = 0.0 if detail["immune"] else detail["final"]
+        expected_factor = (1.0 - death_rate) + death_rate * retain
+
+        factor = scale * base_multiplier
+        lines = []
+        if exp_high:
+            lines.append(
+                f"✨ 修为 {self._format_amount(exp_low * factor)}-{self._format_amount(exp_high * factor)}"
+            )
+        if stone_high:
+            lines.append(
+                f"💰 灵石 {self._format_amount(stone_low * factor)}-{self._format_amount(stone_high * factor)}"
+            )
+        out = ["🎁 生还收益（按你的境界）：" + " · ".join(lines)]
+        out.append(
+            f"📈 折算风险后期望：约 {int(expected_factor * 100)}%"
+            f"（阵亡保留 {int(retain * 100)}%）"
+        )
+        if scale > 1.0:
+            out.append(f"   • 境界加成 ×{scale:.2f}（基准 {self._get_level_name(self._reward_ref_level(event_data))}）")
+        guaranteed = self._to_int(
+            self._config().get("reward_guaranteed_material"),
+            DEFAULT_WORLD_EVENT_CONFIG["reward_guaranteed_material"],
+        )
+        if guaranteed > 0:
+            out.append(f"   • 材料保底：至少 {guaranteed} 件（另有概率额外掉落）")
+        return "\n".join(out)
+
+    def _calculate_rewards(self, event_data: dict, multiplier: float, player: Optional[Player] = None) -> dict:
+        """按事件模板随机计算奖励
+
+        Args:
+            multiplier: 阵亡惩罚 / 管理员奖励倍率（作用于修为与灵石）
+            player: 参战玩家；传入后修为/灵石按境界成长、材料走保底与数量区间
+                    （v3.11.0）。不传则退化为旧版固定区间行为。
+        """
         template_rewards = event_data.get("rewards") or {}
         multiplier = max(0.0, multiplier)
         rewards = {
@@ -1463,24 +1639,39 @@ class WorldEventManager:
             "titles": [],
         }
 
-        stone_range = template_rewards.get("spirit_stone")
-        if isinstance(stone_range, (list, tuple)) and len(stone_range) >= 2:
-            low, high = self._to_int(stone_range[0], 0), self._to_int(stone_range[1], 0)
-            if high < low:
-                low, high = high, low
-            rewards["spirit_stone"] = int(random.randint(low, high) * multiplier)
+        # v3.11.0：境界成长倍率（模板区间是「基准境界」处的数值）
+        level_scale = self._reward_scale_for_player(player, event_data) if player else 1.0
+        scale = max(0.0, multiplier) * level_scale
 
-        exp_range = template_rewards.get("exp")
-        if isinstance(exp_range, (list, tuple)) and len(exp_range) >= 2:
-            low, high = self._to_int(exp_range[0], 0), self._to_int(exp_range[1], 0)
-            if high < low:
-                low, high = high, low
-            rewards["exp"] = int(random.randint(low, high) * multiplier)
+        stone_low, stone_high = self._reward_range(template_rewards, "spirit_stone")
+        if stone_high:
+            rewards["spirit_stone"] = int(random.randint(stone_low, stone_high) * scale)
 
+        exp_low, exp_high = self._reward_range(template_rewards, "exp")
+        if exp_high:
+            rewards["exp"] = int(random.randint(exp_low, exp_high) * scale)
+
+        # 材料：按 rate 掷骰，命中后按 count 区间给数量；记录件数用于保底补足
+        material_pool: List[str] = []
+        material_drops = 0
         for material in template_rewards.get("materials", []) or []:
             name = (material or {}).get("name")
-            if name and random.random() < self._to_float(material.get("rate"), 0.0):
-                rewards["items"].append(name)
+            if not name:
+                continue
+            material_pool.append(name)
+            if random.random() < self._to_float(material.get("rate"), 0.0):
+                count = self._material_count(material)
+                rewards["items"].extend([name] * count)
+                material_drops += count
+
+        guaranteed = max(0, self._to_int(
+            self._config().get("reward_guaranteed_material"),
+            DEFAULT_WORLD_EVENT_CONFIG["reward_guaranteed_material"],
+        ))
+        while material_drops < guaranteed and material_pool:
+            name = random.choice(material_pool)
+            rewards["items"].append(name)
+            material_drops += 1
 
         for equipment in template_rewards.get("equipments", []) or []:
             name = (equipment or {}).get("name")
@@ -1501,8 +1692,13 @@ class WorldEventManager:
 
         return rewards
 
-    async def _grant_rewards(self, user_id: str, rewards: dict) -> Tuple[List[str], List[str]]:
+    async def _grant_rewards(
+        self, user_id: str, rewards: dict, player: Optional[Player] = None
+    ) -> Tuple[List[str], List[str]]:
         """发放奖励（灵石 / 修为 / 物品 / 配方 / 称号）
+
+        Args:
+            player: 已加载的玩家对象；不传则内部按 user_id 查询（避免重复查库）
 
         Returns:
             (成功入库的物品清单, 储物戒空间不足而丢失的物品清单)
@@ -1510,7 +1706,8 @@ class WorldEventManager:
         stored: List[str] = []
         failed: List[str] = []
 
-        player = await self.db.get_player_by_id(user_id)
+        if player is None:
+            player = await self.db.get_player_by_id(user_id)
         if not player:
             return stored, failed
 
@@ -1666,8 +1863,9 @@ class WorldEventManager:
         self, event_id, user_id: str, event_data: dict, multiplier: float, results: dict
     ) -> None:
         """发放奖励并回写个人明细（可见战斗过程与旧版结算共用）"""
-        rewards = self._calculate_rewards(event_data, multiplier)
-        stored, failed = await self._grant_rewards(user_id, rewards)
+        player = await self.db.get_player_by_id(user_id)
+        rewards = self._calculate_rewards(event_data, multiplier, player)
+        stored, failed = await self._grant_rewards(user_id, rewards, player)
         rewards["stored"] = stored
         results["rewards"][str(user_id)] = rewards
         if failed:
@@ -2136,13 +2334,14 @@ class WorldEventManager:
             if exp > 0:
                 lines.append(f"✨ 修为：+{exp:,}")
 
-            # 物品掉落
-            items = rewards.get("items", [])
-            if items:
+            # 物品掉落（v3.11.0：材料支持数量区间，按名称聚合展示「名称×N」）
+            items = rewards.get("items", []) or []
+            item_counter = Counter(items)
+            if item_counter:
                 lines.append(SEP)
                 lines.append("📦 物品掉落：")
-                for item in items:
-                    lines.append(f"  • {item}")
+                for item, count in item_counter.items():
+                    lines.append(f"  • {item}×{count}" if count > 1 else f"  • {item}")
 
             # 配方
             recipes = rewards.get("recipes", [])
@@ -2160,18 +2359,26 @@ class WorldEventManager:
                 for title in titles:
                     lines.append(f"  • {title}")
 
-            # 未入库物品
-            stored = rewards.get("stored", [])
-            failed_items = [item for item in items if item not in stored]
-            if failed_items:
+            # 未入库物品（按名称做数量差集，避免同名物品「一存一漏」时误报）
+            stored = rewards.get("stored", []) or []
+            failed_counter = item_counter - Counter(stored)
+            if failed_counter:
                 lines.append(SEP)
                 lines.append("⚠️ 储物戒已满，未能入库：")
-                for item in failed_items:
-                    lines.append(f"  • {item}")
+                for item, count in failed_counter.items():
+                    lines.append(f"  • {item}×{count}" if count > 1 else f"  • {item}")
 
             lines.append(SEP)
             if not (stone or exp or items or recipes or titles):
                 lines.append("💬 本次事件未获得奖励")
+            else:
+                retained = self._to_float(
+                    self._config().get("death_penalty_reward_rate"),
+                    DEFAULT_WORLD_EVENT_CONFIG["death_penalty_reward_rate"],
+                )
+                if result == RESULT_DEAD:
+                    lines.append(f"💡 本次阵亡，修为/灵石按 {int(retained * 100)}% 结算（掉落不受影响）")
+                lines.append(f"💡 收益随境界成长：高出事件基准境界后，修为/灵石按倍率提升")
 
             return "\n".join(lines)
 
@@ -2307,8 +2514,10 @@ class WorldEventManager:
         except (TypeError, ValueError):
             return 0
 
-    def describe_event(self, event: dict, participants: int = 0, joined: bool = False) -> str:
-        """「世界事件」指令的详情面板"""
+    def describe_event(
+        self, event: dict, participants: int = 0, joined: bool = False, player: Optional[Player] = None
+    ) -> str:
+        """「世界事件」指令的详情面板（v3.11.0 起带个人预估收益）"""
         if not event:
             return (
                 "🌫️ 当前没有世界事件\n"
@@ -2330,6 +2539,12 @@ class WorldEventManager:
             f"🎁 奖励倍率：{self._to_float(event_data.get('reward_multiplier'), 1.0)}x",
             f"👥 报名人数：{participants}/{max_participants}",
         ]
+
+        if player is not None:
+            preview = self.describe_reward_preview(player, event_data)
+            if preview:
+                lines.append(SEP)
+                lines.append(preview)
 
         if event.get("status") == STATUS_SIGNUP:
             lines.append(f"⏰ 报名剩余：{self.format_duration(self._remaining_seconds(event))}")

@@ -54,7 +54,10 @@
       "BREAKTHROUGH_DEATH_PROBABILITY": {
         "description": "突破失败死亡概率范围",
         "type": "list",
-        "default": [0.01, 0.1],
+        "default": [
+          0.01,
+          0.1
+        ],
         "hint": "突破失败时的死亡概率范围。第一个值为最小概率（1%），第二个值为最大概率（10%）。每次突破失败会在此范围内随机一个死亡概率。"
       },
       "PAVILION_REFRESH_HOURS": {
@@ -144,7 +147,11 @@
       "SHOP_TOP_TIER_RANKS": {
         "description": "永不上架的顶级品质",
         "type": "list",
-        "default": ["仙品", "神品", "混元先天"],
+        "default": [
+          "仙品",
+          "神品",
+          "混元先天"
+        ],
         "hint": "这些品质永远不出现在商店货架上，只能通过世界Boss、秘境等途径获取。"
       }
     }
@@ -354,7 +361,10 @@
       "AUTO_INTERVAL_MINUTES": {
         "description": "自动生成间隔（分钟）",
         "type": "list",
-        "default": [120, 240],
+        "default": [
+          120,
+          240
+        ],
         "hint": "两个值构成区间，每次在该区间内随机取一个间隔。例如 [120, 240] 表示 2-4 小时一场。"
       },
       "SIGNUP_DURATION_SECONDS": {
@@ -378,8 +388,8 @@
       "DEATH_PENALTY_REWARD_RATE": {
         "description": "阵亡者奖励保留比例",
         "type": "float",
-        "default": 0.2,
-        "hint": "事件中阵亡（未彻底陨落）的玩家可获得奖励的比例，默认 0.2（20%）；幸存者始终拿全额奖励。"
+        "default": 0.5,
+        "hint": "事件中阵亡（未彻底陨落）的玩家可获得奖励的比例，默认 0.5（50%）；幸存者始终拿全额奖励。v3.11.0 由 0.2 提到 0.5：材料掉落不受该比例影响。"
       },
       "DEATH_MINOR_DECAY": {
         "description": "每领先 1 个小境界的风险系数",
@@ -440,6 +450,36 @@
         "type": "int",
         "default": 2,
         "hint": "报名人数低于该值时不发回合播报（避免单人事件对全群刷屏）；这类事件仍完整记录个人战报，可用「世界事件战报」查询。"
+      },
+      "DEATH_EXP_LOSS_SCALE": {
+        "description": "事件阵亡修为损失折扣",
+        "type": "float",
+        "default": 0.5,
+        "hint": "世界事件阵亡时的修为损失折扣，0.5 表示只承担常规死亡一半的修为损失（常规为 5%，即事件里扣 2.5%）。填 1.0 表示与常规死亡一致，填 0 表示事件阵亡不扣修为（境界/元神/陨落判定不变）。"
+      },
+      "REWARD_LEVEL_SCALING": {
+        "description": "奖励随境界成长",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后修为/灵石奖励按玩家境界成长（模板数值视为基准境界处的数值），关闭则所有人拿同一份固定区间。"
+      },
+      "REWARD_LEVEL_GROWTH": {
+        "description": "每级奖励成长系数",
+        "type": "float",
+        "default": 1.35,
+        "hint": "玩家每高出模板 reward_ref_level 1 个小境界，修为/灵石奖励乘该系数（默认 1.35，即 +35%）。基准境界见 config/world_events.json 各模板的 reward_ref_level。"
+      },
+      "REWARD_MAX_MULTIPLIER": {
+        "description": "境界成长倍率上限",
+        "type": "float",
+        "default": 40.0,
+        "hint": "境界成长倍率的封顶值，默认 40 倍。高境界玩家跨档参加低阶事件时用它兜底，避免刷出离谱收益。"
+      },
+      "REWARD_GUARANTEED_MATERIAL": {
+        "description": "每场材料保底件数",
+        "type": "int",
+        "default": 1,
+        "hint": "每场事件至少掉落的材料件数（从该事件材料池随机），默认 1；填 0 关闭保底。用于保证「复活道具材料副本」真的有产出。"
       }
     }
   },

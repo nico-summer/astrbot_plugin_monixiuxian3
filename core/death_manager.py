@@ -192,7 +192,7 @@ class DeathManager:
 
     # ===== 死亡结算 =====
 
-    async def apply_death(self, player: Player) -> DeathOutcome:
+    async def apply_death(self, player: Player, exp_loss_scale: float = 1.0) -> DeathOutcome:
         """按境界对玩家执行死亡结算
 
         注意：彻底陨落（``kind == "permanent"``）时玩家数据已被删除，
@@ -200,11 +200,16 @@ class DeathManager:
 
         Args:
             player: 当前玩家对象（会被就地修改并写回数据库）
+            exp_loss_scale: 修为损失折扣（v3.11.0），取值 0~1，默认 1.0 表示按
+                常规规则扣修为。世界事件用它给「参加高危副本反而亏修为」止血：
+                事件阵亡只按该折扣承担修为损失（境界/状态/陨落判定完全不变）。
 
         Returns:
-            DeathOutcome 结算结果
+            DeathOutcome 结算结果（``keep_rate`` / ``exp_loss_rate`` 为折扣后的实际值）
         """
         death_config = self.get_death_config()
+        # v3.11.0：世界事件等玩法可传入修为损失折扣（1.0 = 按常规规则全额扣除）
+        loss_scale = self._clamp_rate(self._to_float(exp_loss_scale, 1.0))
         keep_rate = self._clamp_rate(
             self._to_float(
                 death_config.get("rebirth_exp_keep_rate"),
@@ -220,7 +225,9 @@ class DeathManager:
                 death_config.get("soul_exp_loss_rate"),
                 DEFAULT_DEATH_CONFIG["soul_exp_loss_rate"],
             )
-        )
+        ) * loss_scale
+        # 劫后重生同样吃折扣：保留率 = 1 - 常规损失 × 折扣
+        keep_rate = self._clamp_rate(1.0 - (1.0 - keep_rate) * loss_scale)
 
         if player.level_index < SOUL_STATE_LEVEL_INDEX:
             if not player.used_rebirth:

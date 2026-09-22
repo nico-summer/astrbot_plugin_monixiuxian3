@@ -5,21 +5,21 @@
     "max_participants": 10,
     "min_participants": 1,
     "signup_duration_seconds": 300,
-    "death_penalty_reward_rate": 0.2,
-  "death_minor_decay": 0.72,
-  "death_under_level_mult": 1.35,
-  "death_under_level_cap": 2.5,
-  "death_zero_threshold": 0.015,
-  "death_in_range_reduction": 0.5,
-  "death_over_level_decay": 0.6,
-  "death_safe_level_gap": 6,
-  "death_under_level_penalty": 0.2,
-  "enable_combat_power_reduction": true,
-  "combat_power_max_reduction": 0.90,
-  "combat_power_decay": 1.0,
-  "battle_process_enabled": true,
-  "battle_node_count": 0,
-  "battle_broadcast_min_participants": 2,
+    "death_penalty_reward_rate": 0.5,
+    "death_minor_decay": 0.72,
+    "death_under_level_mult": 1.35,
+    "death_under_level_cap": 2.5,
+    "death_zero_threshold": 0.015,
+    "death_in_range_reduction": 0.5,
+    "death_over_level_decay": 0.6,
+    "death_safe_level_gap": 6,
+    "death_under_level_penalty": 0.2,
+    "enable_combat_power_reduction": true,
+    "combat_power_max_reduction": 0.9,
+    "combat_power_decay": 1.0,
+    "battle_process_enabled": true,
+    "battle_node_count": 0,
+    "battle_broadcast_min_participants": 2,
     "auto_tier_weights": {
       "low_tier": 40,
       "mid_tier": 30,
@@ -55,7 +55,12 @@
         }
       }
     },
-    "comment": "世界事件（批次4）：auto_interval_minutes 为自动生成间隔（分钟，取区间随机值）；signup_duration_seconds 为报名时长；death_penalty_reward_rate 为阵亡者奖励保留比例；auto_tier_weights 为自动生成时各难度权重；broadcast_groups 为空时使用插件白名单群；admin_users 为可手动创建事件的管理员（批次5）；ai_config 为AI文案生成配置（批次5，可选）。\n【v3.9.1 死亡率随境界衰减】：death_in_range_reduction=推荐区间内死亡率从门槛到上限的线性衰减比例（0.5=上限处只剩一半）；death_over_level_decay=高出推荐上限后每级乘以的衰减系数（0.6）；death_safe_level_gap=高出推荐上限多少级后完全免死（6，0=关闭）；death_under_level_penalty=低于最低门槛的额外死亡率（0.2）。另：持有回生丹的玩家阵亡时会被丹药抵消一次。\n【战力影响死亡率】：enable_combat_power_reduction=是否启用战力影响死亡率（true/false）；combat_power_max_reduction=战力最大减免上限（0.90=最多减免90%）；combat_power_decay=减免曲线系数 k，减免 = 1 - 1/(1+k×(战力倍率-1))。战力越高（装备+丹药buff），死亡率额外降低，让磕药、神装有实际收益。\n【v3.10.0 小说化风险模型】：最终死亡率 = 事件基准 × 境界优势 × 战力优势。death_minor_decay=每高出推荐门槛 1 个小境界的风险系数（0.72，即每级 -28%）；death_zero_threshold=低于该风险即视同完全免死（0.015）；death_under_level_mult/death_under_level_cap=低于门槛时的风险倍率与上限（正常报名已被境界门槛拦截，此为兜底）。大境界压制沿用 v3.9.4 规则：玩家大境界高于事件推荐上限的大境界 -> 完全免死。\n【已废弃（v3.10.0 起不参与计算，仅保留以兼容旧配置）】：death_in_range_reduction、death_over_level_decay、death_safe_level_gap、death_under_level_penalty。\n【可见战斗过程】：battle_process_enabled=是否分阶段推进并播报战况；battle_node_count=回合数（0=按时长自动）；battle_broadcast_min_participants=触发回合播报所需的最少报名人数。"
+    "comment": "世界事件（批次4）：auto_interval_minutes 为自动生成间隔（分钟，取区间随机值）；signup_duration_seconds 为报名时长；death_penalty_reward_rate 为阵亡者奖励保留比例；auto_tier_weights 为自动生成时各难度权重；broadcast_groups 为空时使用插件白名单群；admin_users 为可手动创建事件的管理员（批次5）；ai_config 为AI文案生成配置（批次5，可选）。\\n【v3.9.1 死亡率随境界衰减】：death_in_range_reduction=推荐区间内死亡率从门槛到上限的线性衰减比例（0.5=上限处只剩一半）；death_over_level_decay=高出推荐上限后每级乘以的衰减系数（0.6）；death_safe_level_gap=高出推荐上限多少级后完全免死（6，0=关闭）；death_under_level_penalty=低于最低门槛的额外死亡率（0.2）。另：持有回生丹的玩家阵亡时会被丹药抵消一次。\\n【战力影响死亡率】：enable_combat_power_reduction=是否启用战力影响死亡率（true/false）；combat_power_max_reduction=战力最大减免上限（0.90=最多减免90%）；combat_power_decay=减免曲线系数 k，减免 = 1 - 1/(1+k×(战力倍率-1))。\\n【v3.10.0 小说化风险模型】：最终死亡率 = 事件基准 × 境界优势 × 战力优势。death_minor_decay=每高出推荐门槛 1 个小境界的风险系数（0.72，即每级 -28%）；death_zero_threshold=低于该风险即视同完全免死（0.015）；death_under_level_mult/death_under_level_cap=低于门槛时的风险倍率与上限。大境界压制沿用 v3.9.4 规则：玩家大境界高于事件推荐上限的大境界 -> 完全免死。\\n【已废弃（v3.10.0 起不参与计算，仅保留以兼容旧配置）】：death_in_range_reduction、death_over_level_decay、death_safe_level_gap、death_under_level_penalty。\\n【可见战斗过程】：battle_process_enabled=是否分阶段推进并播报战况；battle_node_count=回合数（0=按时长自动）；battle_broadcast_min_participants=触发回合播报所需的最少报名人数。\\n【v3.11.0 奖励重构】：reward_level_scaling=修为/灵石奖励是否随玩家境界成长（true/false）；reward_level_growth=每高出模板 reward_ref_level 1 个小境界奖励乘的系数（全局兜底 1.35，各模板可按自己的秘境曲线覆盖，见模板内的 reward_level_growth）；reward_max_multiplier=境界成长倍率上限（40，跨多档参加时兜底）；reward_guaranteed_material=每场事件至少掉落的材料件数（1，0=关闭保底）；death_exp_loss_scale=事件阵亡的修为损失折扣（0.5=只承担常规死亡一半的修为损失，1.0=与常规死亡一致）。模板里的 spirit_stone/exp 是「reward_ref_level（基准境界）」处的数值，参战者按自身境界乘以成长倍率；materials 的 count 支持数量区间（如 灵髓精华 ×2~3），并受保底件数补足。",
+    "death_exp_loss_scale": 0.5,
+    "reward_level_scaling": true,
+    "reward_level_growth": 1.35,
+    "reward_max_multiplier": 40.0,
+    "reward_guaranteed_material": 1
   },
   "event_templates": {
     "low_tier": [
@@ -71,13 +76,23 @@
         "weight": 50,
         "bounty_tag": "world_event_low",
         "rewards": {
-          "spirit_stone": [500, 1000],
-          "exp": [1000, 2000],
+          "spirit_stone": [1200, 3300],
+          "exp": [2400, 6000],
           "materials": [
-            {"name": "妖兽内丹", "rate": 0.30},
-            {"name": "妖兽皮毛", "rate": 0.25}
+            {
+              "name": "妖兽内丹",
+              "rate": 0.35,
+              "count": [1, 2]
+            },
+            {
+              "name": "妖兽皮毛",
+              "rate": 0.3,
+              "count": [1, 2]
+            }
           ]
-        }
+        },
+        "reward_ref_level": 6,
+        "reward_level_growth": 1.15
       },
       {
         "id": "low_002",
@@ -86,18 +101,28 @@
         "description": "邪修在附近城镇作乱，急需正道修士前往镇压",
         "min_level": 1,
         "max_level": 12,
-        "base_death_rate": 0.20,
+        "base_death_rate": 0.2,
         "duration_minutes": 30,
         "weight": 50,
         "bounty_tag": "world_event_low",
         "rewards": {
-          "spirit_stone": [800, 1500],
-          "exp": [1500, 2500],
+          "spirit_stone": [1600, 4000],
+          "exp": [3000, 7500],
           "materials": [
-            {"name": "邪修令牌", "rate": 0.25},
-            {"name": "血灵珠", "rate": 0.20}
+            {
+              "name": "邪修令牌",
+              "rate": 0.3,
+              "count": [1, 2]
+            },
+            {
+              "name": "血灵珠",
+              "rate": 0.25,
+              "count": [1, 2]
+            }
           ]
-        }
+        },
+        "reward_ref_level": 6,
+        "reward_level_growth": 1.15
       }
     ],
     "mid_tier": [
@@ -113,18 +138,42 @@
         "weight": 100,
         "bounty_tag": "world_event_mid",
         "rewards": {
-          "spirit_stone": [3000, 6000],
-          "exp": [10000, 20000],
+          "spirit_stone": [11000, 26000],
+          "exp": [20000, 45000],
           "equipments": [
-            {"name": "魔修战甲", "type": "防具", "quality": "天品", "rate": 0.15},
-            {"name": "嗜血魔刃", "type": "武器", "quality": "天品", "rate": 0.10}
+            {
+              "name": "魔修战甲",
+              "type": "防具",
+              "quality": "天品",
+              "rate": 0.15
+            },
+            {
+              "name": "嗜血魔刃",
+              "type": "武器",
+              "quality": "天品",
+              "rate": 0.1
+            }
           ],
           "materials": [
-            {"name": "魔核", "rate": 0.40},
-            {"name": "魔晶", "rate": 0.30},
-            {"name": "嗜血草", "rate": 0.25}
+            {
+              "name": "魔核",
+              "rate": 0.45,
+              "count": [1, 2]
+            },
+            {
+              "name": "魔晶",
+              "rate": 0.35,
+              "count": [1, 2]
+            },
+            {
+              "name": "嗜血草",
+              "rate": 0.3,
+              "count": [1, 2]
+            }
           ]
-        }
+        },
+        "reward_ref_level": 15,
+        "reward_level_growth": 1.4
       }
     ],
     "high_tier": [
@@ -135,27 +184,58 @@
         "description": "上古大能的洞府重现人间，机缘与危机并存",
         "min_level": 19,
         "max_level": 27,
-        "base_death_rate": 0.50,
+        "base_death_rate": 0.5,
         "duration_minutes": 60,
         "weight": 100,
         "bounty_tag": "world_event_high",
         "rewards": {
-          "spirit_stone": [20000, 40000],
-          "exp": [50000, 100000],
+          "spirit_stone": [220000, 520000],
+          "exp": [420000, 950000],
           "equipments": [
-            {"name": "上古神兵", "type": "武器", "quality": "皇品", "rate": 0.20},
-            {"name": "仙家法宝", "type": "饰品", "quality": "皇品", "rate": 0.15}
+            {
+              "name": "上古神兵",
+              "type": "武器",
+              "quality": "皇品",
+              "rate": 0.2
+            },
+            {
+              "name": "仙家法宝",
+              "type": "饰品",
+              "quality": "皇品",
+              "rate": 0.15
+            }
           ],
           "materials": [
-            {"name": "九转仙草", "rate": 0.30},
-            {"name": "太古龙骨", "rate": 0.25},
-            {"name": "灵髓精华", "rate": 0.40},
-            {"name": "月华精粹", "rate": 0.35}
+            {
+              "name": "九转仙草",
+              "rate": 0.45,
+              "count": [1, 2]
+            },
+            {
+              "name": "太古龙骨",
+              "rate": 0.4,
+              "count": [1, 2]
+            },
+            {
+              "name": "灵髓精华",
+              "rate": 0.55,
+              "count": [2, 3]
+            },
+            {
+              "name": "月华精粹",
+              "rate": 0.5,
+              "count": [1, 2]
+            }
           ],
           "recipes": [
-            {"recipe_id": 101, "rate": 0.10}
+            {
+              "recipe_id": 101,
+              "rate": 0.15
+            }
           ]
-        }
+        },
+        "reward_ref_level": 23,
+        "reward_level_growth": 1.3
       }
     ],
     "epic_tier": [
@@ -166,34 +246,83 @@
         "description": "域外天魔破开位面壁垒，修仙界面临灭顶之灾",
         "min_level": 28,
         "max_level": 36,
-        "base_death_rate": 0.70,
+        "base_death_rate": 0.7,
         "duration_minutes": 90,
         "weight": 100,
         "bounty_tag": "world_event_epic",
         "rewards": {
-          "spirit_stone": [100000, 200000],
-          "exp": [500000, 1000000],
+          "spirit_stone": [1600000, 4800000],
+          "exp": [3000000, 9000000],
           "equipments": [
-            {"name": "传说神器", "type": "武器", "quality": "帝品", "rate": 0.30}
+            {
+              "name": "传说神器",
+              "type": "武器",
+              "quality": "帝品",
+              "rate": 0.3
+            }
           ],
           "materials": [
-            {"name": "天魔精华", "rate": 0.50},
-            {"name": "混沌石", "rate": 0.40},
-            {"name": "仙灵草", "rate": 0.35},
-            {"name": "仙器碎片", "rate": 0.25},
-            {"name": "九转仙草", "rate": 0.45},
-            {"name": "太古龙骨", "rate": 0.40},
-            {"name": "灵髓精华", "rate": 0.50},
-            {"name": "月华精粹", "rate": 0.45}
+            {
+              "name": "天魔精华",
+              "rate": 0.55,
+              "count": [2, 3]
+            },
+            {
+              "name": "混沌石",
+              "rate": 0.45,
+              "count": [1, 2]
+            },
+            {
+              "name": "仙灵草",
+              "rate": 0.4,
+              "count": [1, 3]
+            },
+            {
+              "name": "仙器碎片",
+              "rate": 0.3,
+              "count": [1, 2]
+            },
+            {
+              "name": "九转仙草",
+              "rate": 0.55,
+              "count": [2, 3]
+            },
+            {
+              "name": "太古龙骨",
+              "rate": 0.5,
+              "count": [2, 3]
+            },
+            {
+              "name": "灵髓精华",
+              "rate": 0.65,
+              "count": [3, 5]
+            },
+            {
+              "name": "月华精粹",
+              "rate": 0.55,
+              "count": [2, 4]
+            }
           ],
           "recipes": [
-            {"recipe_id": 101, "rate": 0.30},
-            {"recipe_id": 104, "rate": 0.25}
+            {
+              "recipe_id": 101,
+              "rate": 0.3
+            },
+            {
+              "recipe_id": 104,
+              "rate": 0.25
+            }
           ],
           "special": [
-            {"type": "title", "name": "炼丹师", "rate": 0.05}
+            {
+              "type": "title",
+              "name": "炼丹师",
+              "rate": 0.05
+            }
           ]
-        }
+        },
+        "reward_ref_level": 28,
+        "reward_level_growth": 1.6
       }
     ]
   }

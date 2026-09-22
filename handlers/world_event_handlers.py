@@ -2,7 +2,7 @@
 """世界事件指令处理器（批次4：替代历练系统）
 
 指令一览（注册见 main.py）：
-    世界事件          查看本群进行中的世界事件（报名人数 / 剩余时间 / 我的状态）
+    世界事件          查看本群进行中的世界事件（报名人数 / 剩余时间 / 我的状态 / 我的预估收益）
     加入世界事件      报名参战（报名截止后自动开战，结束后统一结算）
     退出世界事件      报名阶段取消报名
     世界事件战绩      查看自己最近的世界事件记录
@@ -74,8 +74,9 @@ class WorldEventHandlers:
 
         participants = await self.world_event_mgr.get_participants(current["event_id"])
         joined = await self.world_event_mgr.is_participant(current["event_id"], player.user_id)
+        # v3.11.0：面板里带上「按你的境界」的预估收益，方便判断值不值得报名
         yield event.plain_result(
-            self.world_event_mgr.describe_event(current, len(participants), joined)
+            self.world_event_mgr.describe_event(current, len(participants), joined, player)
         )
 
     @player_required

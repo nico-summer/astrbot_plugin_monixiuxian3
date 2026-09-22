@@ -89,7 +89,14 @@ DEFAULT_WORLD_EVENT_CONFIG = {
     "max_participants": 10,               # 单场事件报名人数上限
     "min_participants": 1,                 # 报名人数不足则取消事件
     "signup_duration_seconds": 300,        # 报名时长（秒）
-    "death_penalty_reward_rate": 0.2,      # 阵亡（未彻底陨落）玩家的奖励保留比例
+    # v3.11.0：阵亡保留比例 0.2 -> 0.5（玩家反馈「顶着死亡风险只掉俩魔核」）
+    "death_penalty_reward_rate": 0.5,      # 阵亡（未彻底陨落）玩家的奖励保留比例
+    "death_exp_loss_scale": 0.5,           # 事件阵亡的修为损失折扣（1.0=与常规死亡一致）
+    # v3.11.0 奖励重构：数值随境界成长 + 材料保底
+    "reward_level_scaling": True,          # 修为/灵石奖励随玩家境界成长
+    "reward_level_growth": 1.35,           # 每高出模板 reward_ref_level 1 级，奖励 ×该系数
+    "reward_max_multiplier": 40.0,         # 境界成长倍率上限（跨多档参加时兜底）
+    "reward_guaranteed_material": 1,       # 每场事件至少掉落的材料件数（0=关闭保底）
     # v3.10.0 小说化风险模型：最终死亡率 = 事件基准 × 境界优势 × 战力优势
     "death_minor_decay": 0.72,             # 每高出推荐门槛 1 个小境界，风险乘以该系数
     "death_under_level_mult": 1.35,        # 每低于推荐门槛 1 级，风险乘以该系数（兜底分支）
@@ -126,14 +133,18 @@ _FALLBACK_WORLD_EVENT_TEMPLATES = {
             "description": "凡俗王城外妖兽突袭，需要修士驰援",
             "min_level": 1,
             "max_level": 12,
+            "reward_ref_level": 6,
             "base_death_rate": 0.15,
             "duration_minutes": 30,
             "weight": 100,
             "bounty_tag": "world_event_low",
             "rewards": {
-                "spirit_stone": [500, 1000],
-                "exp": [1000, 2000],
-                "materials": [{"name": "妖兽内丹", "rate": 0.30}],
+                "spirit_stone": [900, 2000],
+                "exp": [2000, 4800],
+                "materials": [
+                    {"name": "妖兽内丹", "rate": 0.35, "count": [1, 2]},
+                    {"name": "妖兽皮毛", "rate": 0.30, "count": [1, 2]},
+                ],
             },
         }
     ],
@@ -145,14 +156,19 @@ _FALLBACK_WORLD_EVENT_TEMPLATES = {
             "description": "魔道大军入侵修仙界，各大宗门紧急召集弟子应战",
             "min_level": 13,
             "max_level": 18,
+            "reward_ref_level": 15,
             "base_death_rate": 0.35,
             "duration_minutes": 45,
             "weight": 100,
             "bounty_tag": "world_event_mid",
             "rewards": {
-                "spirit_stone": [3000, 6000],
-                "exp": [10000, 20000],
-                "materials": [{"name": "魔核", "rate": 0.40}],
+                "spirit_stone": [12000, 28000],
+                "exp": [22000, 50000],
+                "materials": [
+                    {"name": "魔核", "rate": 0.45, "count": [1, 2]},
+                    {"name": "魔晶", "rate": 0.35, "count": [1, 2]},
+                    {"name": "嗜血草", "rate": 0.30, "count": [1, 2]},
+                ],
             },
         }
     ],
@@ -164,14 +180,20 @@ _FALLBACK_WORLD_EVENT_TEMPLATES = {
             "description": "上古大能的洞府重现人间，机缘与危机并存",
             "min_level": 19,
             "max_level": 27,
+            "reward_ref_level": 23,
             "base_death_rate": 0.50,
             "duration_minutes": 60,
             "weight": 100,
             "bounty_tag": "world_event_high",
             "rewards": {
-                "spirit_stone": [20000, 40000],
-                "exp": [50000, 100000],
-                "materials": [{"name": "九转仙草", "rate": 0.30}],
+                "spirit_stone": [220000, 520000],
+                "exp": [420000, 950000],
+                "materials": [
+                    {"name": "九转仙草", "rate": 0.45, "count": [1, 2]},
+                    {"name": "太古龙骨", "rate": 0.40, "count": [1, 2]},
+                    {"name": "灵髓精华", "rate": 0.55, "count": [2, 3]},
+                    {"name": "月华精粹", "rate": 0.50, "count": [1, 2]},
+                ],
             },
         }
     ],
@@ -183,14 +205,24 @@ _FALLBACK_WORLD_EVENT_TEMPLATES = {
             "description": "域外天魔破开位面壁垒，修仙界面临灭顶之灾",
             "min_level": 28,
             "max_level": 36,
+            "reward_ref_level": 32,
             "base_death_rate": 0.70,
             "duration_minutes": 90,
             "weight": 100,
             "bounty_tag": "world_event_epic",
             "rewards": {
-                "spirit_stone": [100000, 200000],
-                "exp": [500000, 1000000],
-                "materials": [{"name": "九转仙草", "rate": 0.45}],
+                "spirit_stone": [12000000, 30000000],
+                "exp": [22000000, 55000000],
+                "materials": [
+                    {"name": "天魔精华", "rate": 0.55, "count": [2, 3]},
+                    {"name": "混沌石", "rate": 0.45, "count": [1, 2]},
+                    {"name": "仙灵草", "rate": 0.40, "count": [1, 3]},
+                    {"name": "仙器碎片", "rate": 0.30, "count": [1, 2]},
+                    {"name": "九转仙草", "rate": 0.55, "count": [2, 3]},
+                    {"name": "太古龙骨", "rate": 0.50, "count": [2, 3]},
+                    {"name": "灵髓精华", "rate": 0.65, "count": [3, 5]},
+                    {"name": "月华精粹", "rate": 0.55, "count": [2, 4]},
+                ],
             },
         }
     ],
