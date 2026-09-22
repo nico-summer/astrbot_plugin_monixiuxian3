@@ -171,16 +171,8 @@ class WorldEventManager:
     def _death_rate_display(self, event_data: dict) -> str:
         """死亡率展示文案（基础值 + 境界压制说明，避免玩家误以为人人同概率）"""
         base = int(self._to_float(event_data.get("base_death_rate"), 0.0) * 100)
-        gap = max(
-            0,
-            self._to_int(
-                self._config().get("death_safe_level_gap"),
-                DEFAULT_WORLD_EVENT_CONFIG["death_safe_level_gap"],
-            ),
-        )
-        if gap > 0:
-            return f"{base}%（基准·境界越高越低，高出推荐上限{gap}级免死）"
-        return f"{base}%"
+        # 新规则：高出一个大境界（9级）完全免死
+        return f"{base}%（基准·境界越高越低，高出推荐上限一个大境界免死）"
 
     def _templates(self) -> Dict[str, List[dict]]:
         """获取事件模板（按难度分组）"""
@@ -898,17 +890,36 @@ class WorldEventManager:
         except (TypeError, ValueError):
             return default
 
-    def _calc_death_rate(self, player: Player, base_death_rate: float, min_level: int, max_level: int) -> float:
-        """计算玩家本次事件的死亡率（境界越高越安全，境界压制到一定程度后完全免死）
+    def _get_major_realm(self, level_index: int) -> str:
+        """获取大境界名称（例如：炼气期、筑基期、金丹期）"""
+        level_data = getattr(self.config_manager, "level_data", None) or []
+        try:
+            index = int(level_index)
+        except (TypeError, ValueError):
+            return ""
+        if 0 <= index < len(level_data):
+            level_name = level_data[index].get("level_name", "")
+            # 提取大境界名称（去掉"初期/中期/后期/一层/二层"等）
+            for realm in ["炼气期", "筑基期", "金丹期", "元婴期", "化神期", "炼虚期", "合体期", "大乘期", "渡劫期"]:
+                if realm in level_name:
+                    return realm
+            # 仙人境界直接返回
+            if "仙" in level_name:
+                return level_name
+        return ""
 
-        规则（参数见 config/world_events.json 的 world_event_config / 插件配置面板）：
+    def _calc_death_rate(self, player: Player, base_death_rate: float, min_level: int, max_level: int) -> float:
+        """计算玩家本次事件的死亡率（境界越高越安全，高出一个大境界完全免死）
+
+        规则：
         1. 基础值取模板 ``base_death_rate``，为 0 时直接免死
-        2. 低于事件最低门槛：额外 + ``death_under_level_penalty``（默认 0.2）
-        3. 处于推荐区间 [min_level, max_level] 内：从门槛处的 100% 线性衰减到
+        2. 【新增】高出推荐上限一个大境界或更多：**完全免死**，符合修仙小说设定
+           - 例如：筑基期参加炼气期事件、金丹期参加筑基期事件等
+        3. 低于事件最低门槛：额外 + ``death_under_level_penalty``（默认 0.2）
+        4. 处于推荐区间 [min_level, max_level] 内：从门槛处的 100% 线性衰减到
            上限处的 ``1 - death_in_range_reduction``（默认只剩一半）
-        4. 高于推荐上限：在 3 的基础上每高 1 级再乘 ``death_over_level_decay``（默认 0.6）
-        5. 高出推荐上限达到 ``death_safe_level_gap`` 级（默认 6 级）时**完全免死**（返回 0）
-        6. 【新增】战力影响：根据玩家综合战力额外降低死亡率（装备、丹药buff都有效）
+        5. 高于推荐上限但同一大境界内：在 4 的基础上每高 1 级再乘 ``death_over_level_decay``（默认 0.6）
+        6. 战力影响：根据玩家综合战力额外降低死亡率（装备、丹药buff都有效）
 
         返回 0 表示无论骰子如何都不会阵亡。
         """
@@ -925,23 +936,47 @@ class WorldEventManager:
         min_level = self._to_int(min_level, 0)
         max_level = self._to_int(max_level, 0)
 
-        # 境界压制：高出推荐上限后风险指数级下降，达到安全阈值直接免死
+        # 【新增】境界压制：比较大境界，高出一个大境界完全免死
+        # 符合修仙小说设定：高一个大境界就是碾压，根本不会有生命危险
         if max_level > 0 and level_index > max_level:
-            safe_gap = max(
-                0,
-                self._to_int(
-                    config.get("death_safe_level_gap"),
-                    DEFAULT_WORLD_EVENT_CONFIG["death_safe_level_gap"],
-                ),
-            )
+            player_realm = self._get_major_realm(level_index)
+            max_realm = self._get_major_realm(max_level)
+
+            # 定义大境界顺序
+            realm_order = ["炼气期", "筑基期", "金丹期", "元婴期", "化神期", "炼虚期", "合体期", "大乘期", "渡劫期", "地仙", "天仙", "大罗金仙", "混元大罗金仙"]
+
+            try:
+                player_rank = realm_order.index(player_realm) if player_realm in realm_order else -1
+                max_rank = realm_order.index(max_realm) if max_realm in realm_order else -1
+
+                # 玩家大境界比事件推荐上限的大境界高至少1个
+                if player_rank > max_rank and player_rank >= 0 and max_rank >= 0:
+                    return 0.0  # 完全免死
+            except (ValueError, IndexError):
+                pass
+
+            # 同一大境界内，或大境界判断失败时，使用原有的指数衰减逻辑
+            # 【优化】根据境界高低调整衰减系数：后期境界每小境界差距更大
             gap = level_index - max_level
-            if safe_gap > 0 and gap >= safe_gap:
-                return 0.0
-            decay = self._to_float(
-                config.get("death_over_level_decay"),
-                DEFAULT_WORLD_EVENT_CONFIG["death_over_level_decay"],
-            )
-            decay = min(0.95, max(0.0, decay))
+
+            # 根据事件推荐上限的境界等级，调整衰减系数
+            # 低阶境界（炼气-筑基）：每级衰减到60%（decay=0.6）
+            # 中阶境界（金丹-元婴）：每级衰减到50%（decay=0.5）
+            # 高阶境界（化神-炼虚）：每级衰减到40%（decay=0.4）
+            # 顶级境界（合体-大乘）：每级衰减到30%（decay=0.3）
+            if max_level >= 25:  # 合体期及以上
+                decay = 0.3
+            elif max_level >= 19:  # 化神期、炼虚期
+                decay = 0.4
+            elif max_level >= 13:  # 金丹期、元婴期
+                decay = 0.5
+            else:  # 炼气期、筑基期
+                decay = self._to_float(
+                    config.get("death_over_level_decay"),
+                    DEFAULT_WORLD_EVENT_CONFIG["death_over_level_decay"],
+                )
+                decay = min(0.95, max(0.0, decay))
+
             base_rate = base * (1.0 - reduction) * (decay ** gap)
         # 低于最低门槛：更危险
         elif min_level > 0 and level_index < min_level:
