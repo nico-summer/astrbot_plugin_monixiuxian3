@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 39  # v39: 爬塔每日挑战次数限制
+LATEST_DB_VERSION = 40  # v40: 世界事件个人奖励查询
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -2076,4 +2076,26 @@ async def _migrate_to_v39(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v39迁移完成：爬塔每日挑战次数限制已启用")
+
+
+@migration(40)
+async def _migrate_to_v40(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v40 - 世界事件个人奖励查询
+
+    为 event_participants 表添加 rewards 字段，用于保存玩家在世界事件中的个人奖励明细。
+    """
+    logger.info("开始迁移到v40：世界事件个人奖励查询")
+
+    # 检查字段是否已存在
+    async with conn.execute("PRAGMA table_info(event_participants)") as cursor:
+        columns = {row[1] for row in await cursor.fetchall()}
+
+    if "rewards" not in columns:
+        await conn.execute("ALTER TABLE event_participants ADD COLUMN rewards TEXT")
+        logger.info("已为 event_participants 表添加 rewards 字段")
+    else:
+        logger.info("rewards 字段已存在，跳过")
+
+    await conn.commit()
+    logger.info("v40迁移完成：世界事件个人奖励查询已启用")
 

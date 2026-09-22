@@ -176,6 +176,7 @@ class TeamHandlers:
             msg += f"\n{icon} [{loot_id}] {item_name} x{quantity}"
 
         msg += "\n\n💡 队长使用 /分配物品 <编号> @某人 分配物品"
+        msg += "\n💡 队长使用 /自动分配 平均分配所有物品"
         yield event.plain_result(msg)
 
     async def handle_assign_loot(self, event: AstrMessageEvent, loot_id: int = 0, target: str = ""):
@@ -260,6 +261,109 @@ class TeamHandlers:
         target_name = target_player.user_name if target_player.user_name else f"道友{target_id[:6]}"
         icon = {"丹药": "🔥", "装备": "⚔️", "功法": "📜", "材料": "📦"}.get(item_type, "📦")
         yield event.plain_result(f"✅ 已将 {icon}{item_name} x{quantity} 分配给 {target_name}")
+
+    async def handle_auto_assign_loot(self, event: AstrMessageEvent):
+        """自动分配物品（队长专用）- 将所有物品平均分配给队伍成员"""
+        user_id = event.get_sender_id()
+
+        # 获取用户的队伍
+        team = await self.team_mgr._get_player_team(user_id)
+        if not team:
+            yield event.plain_result("❌ 你不在任何队伍中！")
+            return
+
+        # 检查是否为队长
+        if team["leader_id"] != user_id:
+            yield event.plain_result("❌ 只有队长可以自动分配物品！")
+            return
+
+        # 获取队伍成员列表
+        members = await self.team_mgr.get_team_members(team["team_id"])
+        if not members:
+            yield event.plain_result("❌ 队伍中没有成员！")
+            return
+
+        # 获取队伍掉落
+        async with self.db.conn.execute(
+            "SELECT id, item_name, item_type, quantity FROM team_loot WHERE team_id = ? AND assigned_to IS NULL",
+            (team["team_id"],)
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        if not rows:
+            yield event.plain_result("✅ 队伍暂无待分配物品。")
+            return
+
+        # 分配逻辑：轮流分配给成员
+        member_index = 0
+        assigned_items = []
+        failed_items = []
+
+        import time
+        current_time = int(time.time())
+
+        for row in rows:
+            loot_id, item_name, item_type, quantity = row
+
+            # 轮流分配给下一个成员
+            target_id = members[member_index]["user_id"]
+            target_player = await self.db.get_player_by_id(target_id)
+
+            if not target_player:
+                failed_items.append(f"{item_name}（目标玩家不存在）")
+                member_index = (member_index + 1) % len(members)
+                continue
+
+            # 分配物品
+            success = False
+            if item_type == "丹药":
+                # 存入丹药背包
+                inventory = target_player.get_pills_inventory()
+                inventory[item_name] = inventory.get(item_name, 0) + quantity
+                target_player.set_pills_inventory(inventory)
+                await self.db.update_player(target_player)
+                success = True
+            else:
+                # 存入储物戒
+                if self.rift_mgr.storage_ring_manager:
+                    success, msg_storage = await self.rift_mgr.storage_ring_manager.store_item(
+                        target_player, item_name, quantity, silent=True
+                    )
+                    if not success:
+                        failed_items.append(f"{item_name}（{target_player.user_name or '道友'}储物戒已满）")
+
+            if success:
+                # 标记为已分配
+                await self.db.conn.execute(
+                    "UPDATE team_loot SET assigned_to = ?, assigned_time = ? WHERE id = ?",
+                    (target_id, current_time, loot_id)
+                )
+                target_name = target_player.user_name if target_player.user_name else f"道友{target_id[:6]}"
+                icon = {"丹药": "🔥", "装备": "⚔️", "功法": "📜", "材料": "📦"}.get(item_type, "📦")
+                assigned_items.append(f"{icon}{item_name} x{quantity} → {target_name}")
+
+            # 下一个成员
+            member_index = (member_index + 1) % len(members)
+
+        await self.db.conn.commit()
+
+        # 生成结果消息
+        result_msg = "✅ 自动分配完成！\n━━━━━━━━━━━━━━━\n"
+
+        if assigned_items:
+            result_msg += "\n📦 已分配物品：\n"
+            for item_info in assigned_items:
+                result_msg += f"  • {item_info}\n"
+
+        if failed_items:
+            result_msg += "\n⚠️ 分配失败：\n"
+            for item_info in failed_items:
+                result_msg += f"  • {item_info}\n"
+
+        if not assigned_items and not failed_items:
+            result_msg = "✅ 没有可分配的物品"
+
+        yield event.plain_result(result_msg)
 
     async def handle_join_team(self, event: AstrMessageEvent, target: str = ""):
         """主动加入队伍（支持队伍编号 或 @队长）"""

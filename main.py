@@ -37,7 +37,7 @@ from .handlers.commission_handlers import (
 # 世界事件（批次4）：指令名统一定义在 handlers/world_event_handlers.py，
 # 保证「注册指令名」与「提示文案里的指令名」始终一致
 from .handlers.world_event_handlers import (
-    CMD_WORLD_EVENT, CMD_JOIN_WORLD_EVENT, CMD_LEAVE_WORLD_EVENT, CMD_WORLD_EVENT_RECORD,
+    CMD_WORLD_EVENT, CMD_JOIN_WORLD_EVENT, CMD_LEAVE_WORLD_EVENT, CMD_WORLD_EVENT_RECORD, CMD_WORLD_EVENT_REWARDS,
 )
 # 爬塔系统：指令名统一定义在 handlers/tower_handlers.py
 from .handlers.tower_handlers import (
@@ -244,6 +244,7 @@ CMD_TEAM_EXPLORE = "组队探索"
 CMD_TEAM_COMPLETE = "完成组队"
 CMD_TEAM_LOOT = "队伍掉落"
 CMD_ASSIGN_LOOT = "分配物品"
+CMD_AUTO_ASSIGN_LOOT = "自动分配"
 
 CMD_REBIRTH = "弃道重修"
 
@@ -1813,6 +1814,12 @@ class XiuXianPlugin(Star):
         async for r in self.world_event_handlers.handle_record(event):
             yield r
 
+    @filter.command(CMD_WORLD_EVENT_REWARDS, "查看世界事件个人奖励")
+    @require_whitelist
+    async def handle_world_event_rewards(self, event: AstrMessageEvent):
+        async for r in self.world_event_handlers.handle_rewards(event):
+            yield r
+
     # ==================== 爬塔系统 ====================
 
     @filter.command(CMD_TOWER_INFO, "查看爬塔进度和战力")
@@ -2300,4 +2307,10 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_assign_loot(self, event: AstrMessageEvent, loot_id: int = 0, target: str = ""):
         async for r in self.team_handlers.handle_assign_loot(event, loot_id, target):
+            yield r
+
+    @filter.command(CMD_AUTO_ASSIGN_LOOT, "自动平均分配队伍掉落")
+    @require_whitelist
+    async def handle_auto_assign_loot(self, event: AstrMessageEvent):
+        async for r in self.team_handlers.handle_auto_assign_loot(event):
             yield r

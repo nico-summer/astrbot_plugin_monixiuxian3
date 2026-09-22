@@ -83,6 +83,7 @@ CMD_WORLD_EVENT = "世界事件"
 CMD_JOIN_WORLD_EVENT = "加入世界事件"
 CMD_LEAVE_WORLD_EVENT = "退出世界事件"
 CMD_WORLD_EVENT_RECORD = "世界事件战绩"
+CMD_WORLD_EVENT_REWARDS = "我的世界事件奖励"  # 新增：查看个人奖励
 
 # 事件状态
 STATUS_SIGNUP = "signup"             # 报名中
@@ -310,6 +311,7 @@ class WorldEventManager:
     @classmethod
     def get_equipment_index(cls) -> Dict[str, dict]:
         """事件掉落装备名 -> 完整装备配置（结果缓存）"""
+        global _EQUIPMENT_INDEX
         if _EQUIPMENT_INDEX is not None:
             return _EQUIPMENT_INDEX
 
@@ -583,6 +585,18 @@ class WorldEventManager:
             await self.db.conn.commit()
         except Exception as e:
             logger.warning(f"[世界事件] 记录参与者结果失败: {e}")
+
+    async def _save_participant_rewards(self, event_id, user_id: str, rewards: dict):
+        """保存参与者的个人奖励明细（新增：用于后续查询）"""
+        try:
+            rewards_json = json.dumps(rewards, ensure_ascii=False)
+            await self.db.conn.execute(
+                "UPDATE event_participants SET rewards = ? WHERE event_id = ? AND user_id = ?",
+                (rewards_json, int(event_id), str(user_id)),
+            )
+            await self.db.conn.commit()
+        except Exception as e:
+            logger.warning(f"[世界事件] 保存参与者奖励失败: {e}")
 
     async def _update_status(self, event_id, status: str, **fields):
         """更新事件状态（可附加字段）"""
@@ -858,6 +872,9 @@ class WorldEventManager:
             results["rewards"][str(user_id)] = rewards
             if failed:
                 results["not_stored"].extend(failed)
+
+            # 【新增】保存个人奖励明细到数据库，用于后续查询
+            await self._save_participant_rewards(event_id, user_id, rewards)
 
             # 生还者推进悬赏进度（世界事件标签，见 config/bounty_templates.json）
             if not died and bounty_tag:
@@ -1457,6 +1474,7 @@ class WorldEventManager:
             lines.append(f"⚠️ 储物戒已满，未能入库：{'、'.join(unique)}")
 
         lines.append(SEP)
+        lines.append(f"💡 发送「{CMD_WORLD_EVENT_REWARDS}」查看你的个人奖励明细")
         return "\n".join(lines)
 
     def format_player_history(self, history: List[dict]) -> str:
@@ -1484,6 +1502,119 @@ class WorldEventManager:
             )
         lines.append(SEP)
         return "\n".join(lines)
+
+    async def format_player_rewards(self, user_id: str, event_id: int = None) -> str:
+        """查看玩家在最近世界事件中获得的个人奖励明细（新增功能）"""
+        try:
+            if event_id is not None:
+                # 查询指定事件的奖励
+                async with self.db.conn.execute(
+                    """
+                    SELECT e.event_data, p.rewards, p.result
+                    FROM event_participants p
+                    JOIN world_events e ON e.event_id = p.event_id
+                    WHERE p.user_id = ? AND p.event_id = ?
+                    """,
+                    (str(user_id), int(event_id)),
+                ) as cursor:
+                    row = await cursor.fetchone()
+            else:
+                # 查询最近一次完成的事件的奖励
+                async with self.db.conn.execute(
+                    """
+                    SELECT e.event_data, p.rewards, p.result
+                    FROM event_participants p
+                    JOIN world_events e ON e.event_id = p.event_id
+                    WHERE p.user_id = ? AND e.status = ? AND p.rewards IS NOT NULL
+                    ORDER BY e.complete_time DESC LIMIT 1
+                    """,
+                    (str(user_id), STATUS_COMPLETED),
+                ) as cursor:
+                    row = await cursor.fetchone()
+
+            if not row:
+                return (
+                    "📭 暂无世界事件奖励记录\n"
+                    f"{SEP}\n"
+                    "💡 参加世界事件并完成结算后可查看个人奖励明细"
+                )
+
+            event_data = self.parse_event_data(row["event_data"])
+            rewards_json = row["rewards"]
+            result = row["result"]
+
+            if not rewards_json:
+                return (
+                    f"🌟 【{event_data.get('name', '世界事件')}】\n"
+                    f"{SEP}\n"
+                    "⚠️ 该事件暂无奖励记录"
+                )
+
+            rewards = json.loads(rewards_json)
+            result_labels = {
+                RESULT_SURVIVOR: "✅ 生还",
+                RESULT_DEAD: "💀 阵亡",
+                RESULT_FALLEN: "🪦 陨落",
+            }
+
+            lines = [
+                "🎁 世界事件个人奖励",
+                SEP,
+                f"🌟 【{event_data.get('name', '世界事件')}】",
+                f"📊 结算结果：{result_labels.get(result, '❔ 未知')}",
+                SEP,
+            ]
+
+            # 灵石和修为
+            stone = self._to_int(rewards.get("spirit_stone"), 0)
+            exp = self._to_int(rewards.get("exp"), 0)
+            if stone > 0:
+                lines.append(f"💰 灵石：+{stone:,}")
+            if exp > 0:
+                lines.append(f"✨ 修为：+{exp:,}")
+
+            # 物品掉落
+            items = rewards.get("items", [])
+            if items:
+                lines.append(SEP)
+                lines.append("📦 物品掉落：")
+                for item in items:
+                    lines.append(f"  • {item}")
+
+            # 配方
+            recipes = rewards.get("recipes", [])
+            if recipes:
+                lines.append(SEP)
+                lines.append("📜 丹方：")
+                for recipe_id in recipes:
+                    lines.append(f"  • 配方 #{recipe_id}")
+
+            # 称号
+            titles = rewards.get("titles", [])
+            if titles:
+                lines.append(SEP)
+                lines.append("🎖️ 称号：")
+                for title in titles:
+                    lines.append(f"  • {title}")
+
+            # 未入库物品
+            stored = rewards.get("stored", [])
+            failed_items = [item for item in items if item not in stored]
+            if failed_items:
+                lines.append(SEP)
+                lines.append("⚠️ 储物戒已满，未能入库：")
+                for item in failed_items:
+                    lines.append(f"  • {item}")
+
+            lines.append(SEP)
+            if not (stone or exp or items or recipes or titles):
+                lines.append("💬 本次事件未获得奖励")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            logger.error(f"[世界事件] 查询玩家奖励失败: {e}")
+            return f"❌ 查询奖励失败：{e}"
 
     async def get_player_history(self, user_id: str, limit: int = 8) -> List[dict]:
         """获取玩家最近的世界事件记录"""
@@ -1537,6 +1668,7 @@ class WorldEventManager:
                 "💡 事件会自动生成并广播到群，发送「世界事件帮助」查看玩法"
             )
 
+        event_data = event["data"]
         max_participants = max(1, self._to_int(self._config().get("max_participants"), 10))
         lines = [
             f"🌟 世界事件：【{event_data.get('name', '世界事件')}】",

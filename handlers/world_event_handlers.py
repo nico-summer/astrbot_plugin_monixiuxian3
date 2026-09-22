@@ -19,6 +19,7 @@ from ..managers.world_event_manager import (
     CMD_LEAVE_WORLD_EVENT,
     CMD_WORLD_EVENT,
     CMD_WORLD_EVENT_RECORD,
+    CMD_WORLD_EVENT_REWARDS,
     WorldEventManager,
 )
 from ..models import Player
@@ -30,6 +31,7 @@ __all__ = [
     "CMD_JOIN_WORLD_EVENT",
     "CMD_LEAVE_WORLD_EVENT",
     "CMD_WORLD_EVENT_RECORD",
+    "CMD_WORLD_EVENT_REWARDS",
 ]
 
 GROUP_ONLY_HINT = (
@@ -120,3 +122,9 @@ class WorldEventHandlers:
         """查看个人世界事件战绩"""
         history = await self.world_event_mgr.get_player_history(player.user_id)
         yield event.plain_result(self.world_event_mgr.format_player_history(history))
+
+    @player_required
+    async def handle_rewards(self, player: Player, event: AstrMessageEvent):
+        """查看个人世界事件奖励明细"""
+        msg = await self.world_event_mgr.format_player_rewards(player.user_id)
+        yield event.plain_result(msg)
