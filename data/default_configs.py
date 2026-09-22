@@ -90,10 +90,23 @@ DEFAULT_WORLD_EVENT_CONFIG = {
     "min_participants": 1,                 # 报名人数不足则取消事件
     "signup_duration_seconds": 300,        # 报名时长（秒）
     "death_penalty_reward_rate": 0.2,      # 阵亡（未彻底陨落）玩家的奖励保留比例
-    "death_in_range_reduction": 0.5,       # 境界在推荐区间内时死亡率从门槛→上限线性衰减的比例
-    "death_over_level_decay": 0.6,         # 境界每高出推荐上限 1 级，死亡率的乘算衰减系数
-    "death_safe_level_gap": 6,             # 高出推荐上限达到该级数后完全免死（0=关闭免死规则）
-    "death_under_level_penalty": 0.2,      # 低于事件最低门槛时额外增加的死亡率
+    # v3.10.0 小说化风险模型：最终死亡率 = 事件基准 × 境界优势 × 战力优势
+    "death_minor_decay": 0.72,             # 每高出推荐门槛 1 个小境界，风险乘以该系数
+    "death_under_level_mult": 1.35,        # 每低于推荐门槛 1 级，风险乘以该系数（兜底分支）
+    "death_under_level_cap": 2.5,          # 低于门槛时的风险倍率上限
+    "death_zero_threshold": 0.015,         # 最终风险低于该值即视同完全免死（不再掷骰）
+    "enable_combat_power_reduction": True,  # 是否让战力（装备 + 丹药 buff）降低死亡率
+    "combat_power_max_reduction": 0.90,    # 战力减免上限（v3.10.0 由 0.30 提到 0.90）
+    "combat_power_decay": 1.0,             # 战力减免曲线系数 k：减免 = 1 - 1/(1+k×(战力倍率-1))
+    # 以下 4 项为 v3.9.x 旧模型参数，v3.10.0 起不参与计算（保留以兼容旧配置文件）
+    "death_in_range_reduction": 0.5,
+    "death_over_level_decay": 0.6,
+    "death_safe_level_gap": 6,
+    "death_under_level_penalty": 0.2,
+    # v3.10.0 可见战斗过程
+    "battle_process_enabled": True,        # 是否分阶段推进并播报战况
+    "battle_node_count": 0,                # 战斗回合数，0=按时长自动（<=45min 3 回合 / <=60min 4 / 更长 5）
+    "battle_broadcast_min_participants": 2,  # 触发回合播报所需的报名人数下限
     "auto_tier_weights": {                 # 自动生成时各难度权重
         "low_tier": 40,
         "mid_tier": 30,

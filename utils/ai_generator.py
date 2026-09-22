@@ -56,6 +56,7 @@ class AIGenerator:
 
         self.enable_intro = merged_config.get("enable_ai_intro", False)
         self.enable_summary = merged_config.get("enable_ai_summary", False)
+        self.enable_battle = merged_config.get("enable_ai_battle", False)
         self.api_key = merged_config.get("ai_api_key", "")
         self.model = merged_config.get("ai_model", "gpt-3.5-turbo")
         self.base_url = merged_config.get("ai_base_url", "")
@@ -68,7 +69,7 @@ class AIGenerator:
             logger.warning("AI功能已禁用：requests库未安装")
 
         # 检查配置
-        if (self.enable_intro or self.enable_summary):
+        if (self.enable_intro or self.enable_summary or self.enable_battle):
             if not self.api_key:
                 logger.warning("AI功能已启用但未配置API Key，将使用固定模板")
             if not self.base_url:
@@ -77,6 +78,7 @@ class AIGenerator:
     # 插件配置面板分组与键名映射（_conf_schema.json 的 AI_GENERATOR 分组）
     PLUGIN_CONFIG_GROUP = "AI_GENERATOR"
     PLUGIN_KEY_MAP = {
+        "ENABLE_AI_BATTLE": "enable_ai_battle",
         "ENABLE_AI_INTRO": "enable_ai_intro",
         "ENABLE_AI_SUMMARY": "enable_ai_summary",
         "AI_API_KEY": "ai_api_key",
@@ -91,6 +93,7 @@ class AIGenerator:
         merged = {
             "enable_ai_intro": False,
             "enable_ai_summary": False,
+            "enable_ai_battle": False,
             "ai_provider": "openai",
             "ai_api_key": "",
             "ai_model": "gpt-3.5-turbo",
@@ -179,6 +182,69 @@ class AIGenerator:
             return self._fixed_intro(event_name, tier)
 
         return text or f"【{event_name}】降临！"
+
+    def generate_battle_stage(
+        self,
+        event_name: str,
+        tier: str,
+        node: int,
+        node_total: int,
+        boss_hp_pct: int,
+        casualties: int,
+    ) -> str:
+        """生成世界事件单个回合的氛围句（v3.10.0 可见战斗过程）
+
+        **只写氛围，不写事实。** 所有玩家名、数值、伤亡都由
+        ``managers/world_event_battle.py`` 以占位形式写入播报，AI 的产出里
+        一旦出现人名或数字反而会与真实战况冲突（幻觉风险），因此提示词明确
+        禁止出现具体人名与数值，并要求 40~60 字、只输出正文。
+
+        未启用 AI（或未配置 API）时返回空串，由调用方回退到固定文案池。
+
+        Args:
+            event_name: 事件名称
+            tier: 难度（低阶 / 中阶 / 高阶 / 史诗）
+            node: 当前回合序号（从 1 开始）
+            node_total: 总回合数
+            boss_hp_pct: 敌方首领剩余气血百分比
+            casualties: 本回合伤亡人数（阵亡 + 陨落 + 回生丹免死）
+
+        Returns:
+            str: 氛围文案；未启用 AI 时为空串
+        """
+        if not self.enable_battle:
+            return ""
+
+        if node <= 1:
+            stage_desc = "战斗刚打响，双方试探交锋"
+        elif node >= node_total:
+            stage_desc = "已是最后一回合，双方全力相搏"
+        elif boss_hp_pct <= 30:
+            stage_desc = "敌方首领气血将尽，仍在困兽犹斗"
+        else:
+            stage_desc = "鏖战正酣，战线反复易手"
+
+        if casualties > 0:
+            mood = "本回合有人倒下，战况惨烈"
+        else:
+            mood = "本回合无伤亡，但凶险万分"
+
+        prompt = f"""你是一个修仙小说作家。请为世界事件的一个回合写一句氛围描写。
+
+事件：{event_name}（{tier}）
+进度：第 {node}/{node_total} 回合
+局势：{stage_desc}
+氛围：{mood}
+
+要求：
+1. 修仙小说风格，40~60 字，一到两句话
+2. 只写环境、气势、招式光影等氛围
+3. 严禁出现任何具体人名，严禁出现任何数字或百分比
+4. 不要罗列战果，不要写谁死谁活
+5. 直接输出文案，不要引号、不要标题、不要其他内容："""
+
+        text = self._call_openai_api(prompt, max_tokens=300)
+        return text or ""
 
     def generate_event_summary(self, event_name: str, participants: list,
                               deaths: list, survivors: list,

@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 40  # v40: 世界事件个人奖励查询
+LATEST_DB_VERSION = 41  # v41: 世界事件可见战斗过程（逐回合战报）
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -212,7 +212,9 @@ WORLD_EVENTS_TABLE_SQL = """
         signup_end_time INTEGER NOT NULL DEFAULT 0,
         start_time INTEGER NOT NULL DEFAULT 0,
         end_time INTEGER NOT NULL DEFAULT 0,
-        complete_time INTEGER NOT NULL DEFAULT 0
+        complete_time INTEGER NOT NULL DEFAULT 0,
+        battle_state TEXT NOT NULL DEFAULT '',
+        battle_node INTEGER NOT NULL DEFAULT 0
     )
 """
 
@@ -227,6 +229,7 @@ EVENT_PARTICIPANTS_TABLE_SQL = """
         user_id TEXT NOT NULL,
         join_time INTEGER NOT NULL DEFAULT 0,
         result TEXT,
+        rewards TEXT,
         PRIMARY KEY (event_id, user_id),
         FOREIGN KEY (event_id) REFERENCES world_events(event_id) ON DELETE CASCADE,
         FOREIGN KEY (user_id) REFERENCES players(user_id) ON DELETE CASCADE
@@ -2098,4 +2101,41 @@ async def _migrate_to_v40(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v40迁移完成：世界事件个人奖励查询已启用")
+
+
+@migration(41)
+async def _migrate_to_v41(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v41 - 世界事件可见战斗过程
+
+    为 world_events 表添加两个字段：
+
+    - ``battle_state``：战斗过程快照（JSON）。存放逐回合战况、每人战意/输出，
+      以及个人视角的回合记录。为空表示该事件未启用可见战斗过程，结算走旧版
+      「整场一次掷骰」路径，因此升级期间正在进行中的事件也能正常结算。
+    - ``battle_node``：已结算的回合数。用于 CAS 占位，避免重复 tick / 插件重启
+      造成同一个回合被播报两次（与结算用 status 原子占位同理）。
+    """
+    logger.info("开始迁移到v41：世界事件可见战斗过程")
+
+    async with conn.execute("PRAGMA table_info(world_events)") as cursor:
+        columns = {row[1] for row in await cursor.fetchall()}
+
+    if "battle_state" not in columns:
+        await conn.execute(
+            "ALTER TABLE world_events ADD COLUMN battle_state TEXT NOT NULL DEFAULT ''"
+        )
+        logger.info("已为 world_events 表添加 battle_state 字段")
+    else:
+        logger.info("battle_state 字段已存在，跳过")
+
+    if "battle_node" not in columns:
+        await conn.execute(
+            "ALTER TABLE world_events ADD COLUMN battle_node INTEGER NOT NULL DEFAULT 0"
+        )
+        logger.info("已为 world_events 表添加 battle_node 字段")
+    else:
+        logger.info("battle_node 字段已存在，跳过")
+
+    await conn.commit()
+    logger.info("v41迁移完成：世界事件可见战斗过程已启用")
 

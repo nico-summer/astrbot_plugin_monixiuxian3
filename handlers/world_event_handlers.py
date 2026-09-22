@@ -6,6 +6,7 @@
     加入世界事件      报名参战（报名截止后自动开战，结束后统一结算）
     退出世界事件      报名阶段取消报名
     世界事件战绩      查看自己最近的世界事件记录
+    世界事件战报      查看最近一场世界事件的逐回合回放（个人视角）
 
 世界事件为群内多人协作玩法：报名 → 开战 → 结算，全过程由定时任务自动推进，
 结果广播到事件所在群，无需玩家手动提交。
@@ -18,6 +19,7 @@ from ..managers.world_event_manager import (
     CMD_JOIN_WORLD_EVENT,
     CMD_LEAVE_WORLD_EVENT,
     CMD_WORLD_EVENT,
+    CMD_WORLD_EVENT_BATTLE,
     CMD_WORLD_EVENT_RECORD,
     CMD_WORLD_EVENT_REWARDS,
     WorldEventManager,
@@ -32,6 +34,7 @@ __all__ = [
     "CMD_LEAVE_WORLD_EVENT",
     "CMD_WORLD_EVENT_RECORD",
     "CMD_WORLD_EVENT_REWARDS",
+    "CMD_WORLD_EVENT_BATTLE",
 ]
 
 GROUP_ONLY_HINT = (
@@ -127,4 +130,10 @@ class WorldEventHandlers:
     async def handle_rewards(self, player: Player, event: AstrMessageEvent):
         """查看个人世界事件奖励明细"""
         msg = await self.world_event_mgr.format_player_rewards(player.user_id)
+        yield event.plain_result(msg)
+
+    @player_required
+    async def handle_battle_report(self, player: Player, event: AstrMessageEvent):
+        """查看个人视角的世界事件战报（逐回合回放）"""
+        msg = await self.world_event_mgr.format_battle_report(player.user_id)
         yield event.plain_result(msg)

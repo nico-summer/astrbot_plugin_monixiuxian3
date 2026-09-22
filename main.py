@@ -37,7 +37,8 @@ from .handlers.commission_handlers import (
 # 世界事件（批次4）：指令名统一定义在 handlers/world_event_handlers.py，
 # 保证「注册指令名」与「提示文案里的指令名」始终一致
 from .handlers.world_event_handlers import (
-    CMD_WORLD_EVENT, CMD_JOIN_WORLD_EVENT, CMD_LEAVE_WORLD_EVENT, CMD_WORLD_EVENT_RECORD, CMD_WORLD_EVENT_REWARDS,
+    CMD_WORLD_EVENT, CMD_JOIN_WORLD_EVENT, CMD_LEAVE_WORLD_EVENT, CMD_WORLD_EVENT_RECORD,
+    CMD_WORLD_EVENT_REWARDS, CMD_WORLD_EVENT_BATTLE,
 )
 # 爬塔系统：指令名统一定义在 handlers/tower_handlers.py
 from .handlers.tower_handlers import (
@@ -1818,6 +1819,12 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_world_event_rewards(self, event: AstrMessageEvent):
         async for r in self.world_event_handlers.handle_rewards(event):
+            yield r
+
+    @filter.command(CMD_WORLD_EVENT_BATTLE, "查看世界事件逐回合战报")
+    @require_whitelist
+    async def handle_world_event_battle(self, event: AstrMessageEvent):
+        async for r in self.world_event_handlers.handle_battle_report(event):
             yield r
 
     # ==================== 爬塔系统 ====================

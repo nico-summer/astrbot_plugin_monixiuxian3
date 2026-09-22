@@ -8,11 +8,15 @@
 - 事件按群独立：每个群一份报名名单与结算结果，同名事件可在多个群同时开启
 - 阵亡会触发批次1 的死亡机制（低阶「劫后重生」/ 金丹以上「元神状态」）
 - v3.9.1 起死亡率为「境界压制」模型：境界越高死亡风险越低，
-  高出事件推荐上限 death_safe_level_gap 级（默认 6 级）后**完全免死**，
+  高出事件推荐上限一个大境界后**完全免死**（v3.10.0 小说化模型：最终死亡率 = 基准 × 境界优势 × 战力优势），
   不会再出现炼虚期修士被低阶妖兽围城骰死的情况
 - v3.9.1 起持有「回生丹」的玩家阵亡时优先被丹药抵消（与突破走火入魔同逻辑）
 - 幸存者拿全额奖励，阵亡者按 death_penalty_reward_rate（默认 20%）结算
 - 奖励含稀有炼丹材料（九转仙草 / 太古龙骨 / 灵髓精华 / 月华精粹），用于炼制还魂丹
+- v3.10.0 起战斗过程可见：报名截止开战后，战斗按时长拆成 3~5 个节点逐段推进，
+  每个节点独立掷骰并实时播报战况。每节点死亡率取 ``1 - (1 - p) ** (1 / N)``，
+  因此**整场死亡率与旧版完全一致**，只是把一次骰子摊成了可见的若干次。
+  具体战况计算见 ``managers/world_event_battle.py``（纯计算，不碰数据库）。
 """
 
 import asyncio
@@ -27,6 +31,7 @@ from astrbot.api import logger
 from ..data.data_manager import DataBase
 from ..data.default_configs import DEFAULT_WORLD_EVENT_CONFIG
 from ..models import Player
+from . import world_event_battle as battle
 
 __all__ = ["WorldEventManager"]
 
@@ -42,10 +47,18 @@ PLUGIN_KEY_MAP = {
     "MIN_PARTICIPANTS": "min_participants",
     "MAX_PARTICIPANTS": "max_participants",
     "DEATH_PENALTY_REWARD_RATE": "death_penalty_reward_rate",
-    "DEATH_IN_RANGE_REDUCTION": "death_in_range_reduction",
-    "DEATH_OVER_LEVEL_DECAY": "death_over_level_decay",
-    "DEATH_SAFE_LEVEL_GAP": "death_safe_level_gap",
-    "DEATH_UNDER_LEVEL_PENALTY": "death_under_level_penalty",
+    # v3.10.0 小说化风险模型（旧的 4 个 DEATH_* 参数已废弃，见 _conf_schema）
+    "DEATH_MINOR_DECAY": "death_minor_decay",
+    "DEATH_ZERO_THRESHOLD": "death_zero_threshold",
+    # v3.10.0 修复：以下两个键此前未登记映射，面板上改动不会生效（只有改
+    # config/world_events.json 才生效）
+    "ENABLE_COMBAT_POWER_REDUCTION": "enable_combat_power_reduction",
+    "COMBAT_POWER_MAX_REDUCTION": "combat_power_max_reduction",
+    "COMBAT_POWER_DECAY": "combat_power_decay",
+    # v3.10.0 新增：可见战斗过程
+    "BATTLE_PROCESS_ENABLED": "battle_process_enabled",
+    "BATTLE_NODE_COUNT": "battle_node_count",
+    "BATTLE_BROADCAST_MIN_PARTICIPANTS": "battle_broadcast_min_participants",
     "BROADCAST_GROUPS": "broadcast_groups",
     "ADMIN_USERS": "admin_users",
 }
@@ -83,7 +96,8 @@ CMD_WORLD_EVENT = "世界事件"
 CMD_JOIN_WORLD_EVENT = "加入世界事件"
 CMD_LEAVE_WORLD_EVENT = "退出世界事件"
 CMD_WORLD_EVENT_RECORD = "世界事件战绩"
-CMD_WORLD_EVENT_REWARDS = "我的世界事件奖励"  # 新增：查看个人奖励
+CMD_WORLD_EVENT_REWARDS = "我的世界事件奖励"  # 查看个人奖励
+CMD_WORLD_EVENT_BATTLE = "世界事件战报"  # 新增：查看个人视角的战斗过程回放
 
 # 事件状态
 STATUS_SIGNUP = "signup"             # 报名中
@@ -107,6 +121,31 @@ EQUIPMENT_STATS = {
 
 # 掉落装备 type -> 装备系统类型
 EQUIPMENT_TYPES = {"武器": "weapon", "防具": "armor", "饰品": "accessory"}
+
+# 未接入 AI 时的回合氛围文案（按回合号取用，确定性输出便于复现排查）
+BATTLE_FLAVOUR = (
+    "灵气激荡，杀声震野。",
+    "血光冲天，战线反复易手。",
+    "双方你来我往，法宝光华照亮半边天。",
+    "烟尘蔽日，喊杀声不绝于耳。",
+    "罡风横扫，战阵几度崩散又重整。",
+)
+
+# 有伤亡时的收束句（无 AI 时使用）
+BATTLE_FLAVOUR_CASUALTY = "战况骤紧，有人再也站不起来了。"
+
+# 大境界顺序（境界压制 / 风险系数展示共用，避免多处硬编码漂移）
+REALM_ORDER = (
+    "炼气期", "筑基期", "金丹期", "元婴期", "化神期", "炼虚期", "合体期",
+    "大乘期", "渡劫期", "地仙", "天仙", "大罗金仙", "混元大罗金仙",
+)
+
+# 结果标签（结算文案 / 个人战报共用）
+RESULT_LABELS = {
+    RESULT_SURVIVOR: "✅ 生还",
+    RESULT_DEAD: "💀 阵亡",
+    RESULT_FALLEN: "🪦 陨落",
+}
 
 # 主法伤的武器关键词
 MAGIC_WEAPON_KEYWORDS = ("法杖", "琴", "符", "笔", "幡", "笛", "钟", "镜", "珠", "法宝")
@@ -145,6 +184,9 @@ class WorldEventManager:
         self.equipment_manager = equipment_manager  # 装备管理器（用于战力计算）
         # AstrBot 插件配置面板（DEATH_CONFIG 同级的 WORLD_EVENT 分组）
         self._ai_generator = None  # AI 文案生成器（懒加载）
+        # 回合氛围文案缓存：键为「模板 + 回合 + 伤亡档位」，与群数无关，
+        # 保证 P1 接入 AI 后调用量不随群数线性膨胀（v3.10.0）
+        self._battle_text_cache: Dict[tuple, str] = {}
         self.plugin_config = plugin_config
 
     # ==================== 配置 ====================
@@ -173,6 +215,144 @@ class WorldEventManager:
         base = int(self._to_float(event_data.get("base_death_rate"), 0.0) * 100)
         # 新规则：高出一个大境界（9级）完全免死
         return f"{base}%（基准·境界越高越低，高出推荐上限一个大境界免死）"
+
+    # ==================== 可见战斗过程（v3.10.0） ====================
+
+    def _battle_process_enabled(self) -> bool:
+        """总开关：是否启用可见战斗过程
+
+        关掉后整场只掷一次骰、不产生战斗状态，行为与 v3.9.x 完全一致。
+        """
+        return bool(self._config().get("battle_process_enabled", True))
+
+    def _battle_broadcast_enabled(self, participant_count: int) -> bool:
+        """是否把回合战况播报到群
+
+        人数不足 ``battle_broadcast_min_participants`` 时**只记录不播报**——
+        单个玩家的回合播报只会变成对全群的刷屏。这类事件的战斗过程照常记录，
+        玩家仍可用「世界事件战报」查看自己的逐回合回放。
+        """
+        try:
+            need = int(self._config().get("battle_broadcast_min_participants") or 2)
+        except (TypeError, ValueError):
+            need = 2
+        try:
+            count = int(participant_count or 0)
+        except (TypeError, ValueError):
+            count = 0
+        return count >= max(1, need)
+
+    def _battle_node_plan(self, duration_minutes: int) -> int:
+        """战斗节点数（配置 battle_node_count=0 时按时长自动规划）"""
+        config = self._config()
+        try:
+            override = int(config.get("battle_node_count") or 0)
+        except (TypeError, ValueError):
+            override = 0
+        return battle.node_count(duration_minutes, override)
+
+    async def build_battle_participants(self, event_id, event_data: dict) -> List[dict]:
+        """构建参战快照（战力 / 整场死亡率），供战斗过程计算使用
+
+        死亡率按「整场」口径计算，节点死亡率由 battle 模块用
+        ``1 - (1 - p) ** (1 / N)`` 折算，保证总死亡率与旧版一致。
+        """
+        participants: List[dict] = []
+        min_level = self._to_int((event_data or {}).get("min_level"), 0)
+        max_level = self._to_int((event_data or {}).get("max_level"), 0)
+        base_death_rate = self._to_float((event_data or {}).get("base_death_rate"), 0.0)
+
+        for user_id in await self.get_participants(event_id):
+            player = await self.db.get_player_by_id(user_id)
+            if not player:
+                continue
+            level_index = self._to_int(getattr(player, "level_index", 0), 0)
+            death_detail = self._calc_death_rate_detail(player, base_death_rate, min_level, max_level)
+            participants.append({
+                "user_id": str(user_id),
+                "name": player.user_name or f"道友{str(user_id)[:6]}",
+                "level_index": level_index,
+                "power": self._player_battle_power(player, level_index),
+                "death_rate": death_detail["final"],
+            })
+        return participants
+
+    def _player_battle_power(self, player: Player, level_index: int) -> float:
+        """玩家在事件中的输出能力（与战力减免共用同一套属性口径）"""
+        combat_power, expected_base = self._player_attr_combat_power(player, level_index)
+        # 保底：低战力玩家也能贡献输出，避免「输出占比 0%」这种尴尬播报
+        return float(max(combat_power, expected_base * 0.35))
+
+    def describe_risk_breakdown(self, player: Player, event_data: dict) -> str:
+        """个人「风险系数」透明化文案（v3.10.0）
+
+        让玩家看得见自己为什么安全 / 危险：境界优势减了多少、战力（装备+丹药）
+        又减了多少。既降低阵亡时的挫败感，也让「穿装备、磕药有用」变得可感知。
+        """
+        min_level = self._to_int((event_data or {}).get("min_level"), 0)
+        max_level = self._to_int((event_data or {}).get("max_level"), 0)
+        base_death_rate = self._to_float((event_data or {}).get("base_death_rate"), 0.0)
+        detail = self._calc_death_rate_detail(player, base_death_rate, min_level, max_level)
+
+        if detail["immune"]:
+            return (
+                f"💀 你的风险系数：0%（事件基准 {detail['base'] * 100:.0f}%）\n"
+                f"   • {detail['immune_reason']}"
+            )
+
+        lines = [
+            f"💀 你的风险系数：{detail['final'] * 100:.1f}%（事件基准 {detail['base'] * 100:.0f}%）"
+        ]
+
+        realm_multiplier = detail["realm_multiplier"]
+        if abs(realm_multiplier - 1.0) >= 0.005:
+            lines.append(
+                f"   • 境界优势：×{realm_multiplier:.2f}（{detail['realm_note']}）"
+            )
+        else:
+            lines.append(f"   • 境界优势：无（{detail['realm_note'] or '无推荐区间'}）")
+
+        reduction = detail["combat_reduction"]
+        if reduction > 0.001:
+            lines.append(f"   • 战力优势：×{detail['power_multiplier']:.2f}（减免 {reduction * 100:.0f}%，装备 + 丹药 buff）")
+        else:
+            lines.append("   • 战力优势：无（战力未超过同境界期望值）")
+
+        return "\n".join(lines)
+
+    def _combat_power_reduction_from_ratio(self, combat_ratio: float, max_reduction: float, decay: float = 1.0) -> float:
+        """战力倍率 -> 死亡率减免比例（连续曲线，唯一口径）
+
+        ``减伤 = 1 - 1 / (1 + decay × (战力倍率 - 1))``，
+        再以 ``max_reduction`` 封顶。含义直观：
+
+        - 战力 = 同境界期望值（倍率 1.0）→ 无减免
+        - 战力 2 倍 → 减免 50%（风险减半）
+        - 战力 4 倍 → 减免 75%（风险降到 1/4）
+
+        v3.10.0 之前是 1.5x/2x/3x/4x 的硬阶梯且封顶 30%，导致「堆了一身神装
+        死亡率几乎不变」，与小说体感不符。
+        """
+        try:
+            ratio = float(combat_ratio)
+        except (TypeError, ValueError):
+            ratio = 1.0
+        try:
+            cap = max(0.0, min(0.95, float(max_reduction)))
+        except (TypeError, ValueError):
+            cap = 0.90
+        try:
+            k = max(0.0, float(decay))
+        except (TypeError, ValueError):
+            k = 1.0
+
+        if ratio <= 1.0:
+            # 战力低于同境界期望值：不给减免（风险由境界段体现）
+            return 0.0
+        if k <= 0.0:
+            return cap
+        continuous = 1.0 - 1.0 / (1.0 + k * (ratio - 1.0))
+        return max(0.0, min(cap, continuous))
 
     def _templates(self) -> Dict[str, List[dict]]:
         """获取事件模板（按难度分组）"""
@@ -409,9 +589,26 @@ class WorldEventManager:
             "start_time": row["start_time"],
             "end_time": row["end_time"],
             "complete_time": row["complete_time"],
+            "battle_node": WorldEventManager._row_field(row, "battle_node", 0),
+            "battle_state": WorldEventManager._row_field(row, "battle_state", ""),
         }
         event["data"] = WorldEventManager.parse_event_data(event["event_data"])
         return event
+
+    @staticmethod
+    def _row_field(row, key: str, default):
+        """安全读取 sqlite3.Row 字段（旧库未迁移时字段不存在，回退默认值）"""
+        try:
+            keys = row.keys()
+        except Exception:
+            return default
+        if key not in keys:
+            return default
+        try:
+            value = row[key]
+        except Exception:
+            return default
+        return default if value is None else value
 
     @staticmethod
     def parse_event_data(event_data) -> dict:
@@ -431,6 +628,7 @@ class WorldEventManager:
         tier_key: str = None,
         reward_multiplier: float = 1.0,
         admin_created: bool = False,
+        intro: str = "",
     ) -> Tuple[bool, str, int]:
         """创建世界事件并进入报名阶段
 
@@ -468,6 +666,8 @@ class WorldEventManager:
             "bounty_tag": template.get("bounty_tag") or "",
             "reward_multiplier": round(max(0.1, self._to_float(reward_multiplier, 1.0)), 2),
             "admin_created": bool(admin_created),
+            # 创建时生成的开场文案随快照落库，开战时直接复用（省掉每群一次 AI 调用）
+            "intro": str(intro or ""),
         }
 
         now = int(time.time())
@@ -609,6 +809,138 @@ class WorldEventManager:
             logger.error(f"[世界事件] 更新事件状态失败: {e}")
             return 0
 
+    # ==================== 战斗状态（可见战斗过程） ====================
+
+    @staticmethod
+    def _load_battle_state(event: dict) -> Optional[dict]:
+        """从事件行反序列化战斗状态；非战斗过程事件返回 None（走旧版结算路径）"""
+        raw = (event or {}).get("battle_state")
+        if not raw:
+            return None
+        try:
+            state = json.loads(raw)
+        except Exception:
+            return None
+        if not isinstance(state, dict) or not state.get("players"):
+            return None
+        return state
+
+    async def _save_battle_state(self, event_id, node: int, state: dict) -> bool:
+        """写入战斗状态（无并发保护，仅用于开战初始化与回合落地后回存）"""
+        try:
+            await self.db.conn.execute(
+                "UPDATE world_events SET battle_node = ?, battle_state = ? WHERE event_id = ?",
+                (int(node), json.dumps(state, ensure_ascii=False), int(event_id)),
+            )
+            await self.db.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"[世界事件] 保存战斗状态失败: {e}")
+            return False
+
+    async def _claim_battle_node(self, event_id, expected_node: int, new_node: int, state: dict) -> bool:
+        """CAS 推进战斗回合：只有抢到「expected -> new」的调用者负责播报
+
+        与结算的 ``status`` 原子占位同理，避免重复 tick / 重启重放导致同一个
+        回合被播报两次。
+
+        顺序说明：先占位再落地死亡（见 ``_advance_battle_node``）。若进程在
+        占位后、死亡落地前崩掉，该回合的阵亡不会生效、状态里仍是存活——
+        宁可少死也不会重复结算，符合"结算不可重复"的优先级。
+        """
+        try:
+            cursor = await self.db.conn.execute(
+                """
+                UPDATE world_events SET battle_node = ?, battle_state = ?
+                WHERE event_id = ? AND battle_node = ?
+                """,
+                (
+                    int(new_node),
+                    json.dumps(state, ensure_ascii=False),
+                    int(event_id),
+                    int(expected_node),
+                ),
+            )
+            await self.db.conn.commit()
+            return bool(cursor.rowcount)
+        except Exception as e:
+            logger.error(f"[世界事件] 推进战斗回合失败: {e}")
+            return False
+
+    async def _resolve_pending_deaths(self, event_id, record: dict) -> Tuple[List[dict], List[dict], List[dict]]:
+        """落地本回合的阵亡：回生丹抵消 -> DeathManager -> 参与者结果写库
+
+        Returns:
+            (阵亡, 回生丹免死, 彻底陨落)
+        """
+        dead: List[dict] = []
+        saved: List[dict] = []
+        fallen: List[dict] = []
+
+        for item in record.get("pending_deaths") or []:
+            user_id = str(item.get("user_id") or "")
+            if not user_id:
+                continue
+            player = await self.db.get_player_by_id(user_id)
+            if not player:
+                continue
+            name = player.user_name or f"道友{user_id[:6]}"
+
+            if await self._try_resurrect_pill(player):
+                # 回生丹抵消本次阵亡（属性减半但活下来），按生还结算
+                saved.append({"user_id": user_id, "name": name})
+                await self._set_participant_result(event_id, user_id, RESULT_SURVIVOR)
+                continue
+
+            outcome = await self._apply_death(player)
+            if outcome is not None and getattr(outcome, "is_permanent", False):
+                # 彻底陨落：角色数据已删除，不再发放奖励
+                fallen.append({"user_id": user_id, "name": name})
+                await self._set_participant_result(event_id, user_id, RESULT_FALLEN)
+                continue
+
+            dead.append({
+                "user_id": user_id,
+                "name": name,
+                "soul": bool(getattr(outcome, "is_soul", False)),
+            })
+            await self._set_participant_result(event_id, user_id, RESULT_DEAD)
+
+        return dead, saved, fallen
+
+    async def _advance_battle_node(self, event: dict, state: dict) -> Tuple[bool, str]:
+        """推进一个战斗回合：掷骰 -> CAS 占位 -> 死亡落地 -> 生成播报
+
+        Args:
+            event: 事件行（含 event_id / data）
+            state: 已反序列化的战斗状态，**就地修改**
+
+        Returns:
+            (是否推进成功, 群内播报文案；抢占失败时文案为空)
+        """
+        event_id = event["event_id"]
+        event_data = event.get("data") or {}
+        expected = int(state.get("resolved") or 0)
+
+        # 1) 纯计算：掷骰、战意、敌方首领血量（不改变任何玩家数据）
+        record = battle.resolve_node(event_data, state)
+
+        # 2) CAS 占位 + 落库（此时尚未落地死亡，崩溃也不会重复结算）
+        if not await self._claim_battle_node(event_id, expected, expected + 1, state):
+            logger.info(
+                f"[世界事件] 回合 {expected + 1} 已被其他调度推进，跳过播报（event_id={event_id}）"
+            )
+            return False, ""
+
+        # 3) 死亡落地
+        dead, saved, fallen = await self._resolve_pending_deaths(event_id, record)
+        battle.apply_node_outcome(state, record, dead=dead, saved=saved, fallen=fallen)
+        await self._save_battle_state(event_id, expected + 1, state)
+
+        casualties = len(dead) + len(saved) + len(fallen)
+        ai_text = await self._generate_battle_text(event_data, state, record, casualties)
+        return True, battle.describe_node(event_data, state, record, ai_text)
+
     # ==================== 报名 ====================
 
     async def join_event(self, player: Player, event_id) -> Tuple[bool, str]:
@@ -662,7 +994,7 @@ class WorldEventManager:
             f"✅ 报名成功！你已加入【{event_data.get('name', '世界事件')}】\n"
             f"{SEP}\n"
             f"👥 当前报名人数：{current_count}/{max_participants}\n"
-            f"💀 预估死亡率：{self._death_rate_display(event_data)}\n"
+            f"{self.describe_risk_breakdown(player, event_data)}\n"
             f"⏰ 报名截止后将自动开战，请留意群消息"
         )
 
@@ -747,13 +1079,33 @@ class WorldEventManager:
         if not cursor.rowcount:
             return False, "⚠️ 事件状态异常", {}
 
+        # 可见战斗过程（v3.10.0）：按时长规划回合并落库初始状态。
+        # 未启用时 battle_state 保持为空 -> 结算走旧版「整场一次掷骰」的路径。
+        nodes = self._battle_node_plan(duration_minutes)
+        staged = False
+        broadcast = False
+        if self._battle_process_enabled():
+            snapshot = await self.build_battle_participants(event_id, event_data)
+            if snapshot:
+                state = battle.init_state(
+                    event_data, snapshot, nodes, now, now + duration_minutes * 60
+                )
+                # 播报门槛只影响「发不发群消息」，战斗过程一律记录，
+                # 否则单人事件将完全拿不到逐回合回放
+                broadcast = self._battle_broadcast_enabled(len(snapshot))
+                state["broadcast"] = broadcast
+                await self._save_battle_state(event_id, 0, state)
+                staged = True
+
         logger.info(
             f"[世界事件] 事件【{name}】(event_id={event_id}) 开战，"
             f"参与 {len(participants)} 人，持续 {duration_minutes} 分钟"
+            f"{'，可见战斗过程 ' + str(nodes) + ' 回合' + ('（本场不播报）' if staged and not broadcast else '') if staged else '，整场一次掷骰结算'}"
         )
 
-        # 开场文案：AI 生成（未开启 AI 时使用固定模板）
-        intro = await self.generate_intro_text(event_data, len(participants))
+        # 开场文案：优先复用创建时的文案，省掉一次 AI 调用（v3.10.0 优化）。
+        # 创建时参与人数为 0，开战时才知道实际人数，因此仅在人数文案不同时重生成。
+        intro = event_data.get("intro") or await self.generate_intro_text(event_data, len(participants))
         lines = [
             "⚔️ 世界事件开战！",
             SEP,
@@ -764,12 +1116,24 @@ class WorldEventManager:
         lines.extend([
             f"👥 参战道友：{len(participants)} 人",
             f"⏰ 预计 {duration_minutes} 分钟后结算",
-            f"💀 预估死亡率：{self._death_rate_display(event_data)}",
-            SEP,
-            "🙏 祝各位道友旗开得胜，平安归来",
         ])
+        if staged:
+            lines.append(
+                f"🗺️ 此战分 {nodes} 个回合推进，战况将实时播报"
+                if broadcast else
+                f"🗺️ 此战分 {nodes} 个回合推进（人数较少，不刷屏播报，可用「{CMD_WORLD_EVENT_BATTLE}」回看）"
+            )
+        lines.append(f"💀 预估死亡率：{self._death_rate_display(event_data)}")
+        lines.append(SEP)
+        lines.append("🙏 祝各位道友旗开得胜，平安归来")
         msg = "\n".join(lines)
-        return True, msg, {"participants": len(participants), "duration_minutes": duration_minutes}
+        return True, msg, {
+            "participants": len(participants),
+            "duration_minutes": duration_minutes,
+            "staged": staged,
+            "broadcast": broadcast,
+            "nodes": nodes if staged else 0,
+        }
 
     async def complete_event(self, event_id) -> Tuple[bool, str, dict]:
         """事件结算：计算死亡与奖励（返回广播消息）"""
@@ -815,67 +1179,19 @@ class WorldEventManager:
         if not participants:
             return True, f"🌫️ 世界事件【{name}】无人参与，已悄然结束", results
 
-        config = self._config()
-        base_death_rate = self._to_float(event_data.get("base_death_rate"), 0.0)
-        reward_multiplier = self._to_float(event_data.get("reward_multiplier"), 1.0)
-        death_reward_rate = self._to_float(config.get("death_penalty_reward_rate"), 0.2)
-        death_reward_rate = max(0.0, min(1.0, death_reward_rate))
-        min_level = self._to_int(event_data.get("min_level"), 0)
-        max_level = self._to_int(event_data.get("max_level"), 0)
-        bounty_tag = str(event_data.get("bounty_tag") or "")
-
-        for user_id in participants:
-            player = await self.db.get_player_by_id(user_id)
-            if not player:
-                continue
-
-            player_name = player.user_name or f"道友{str(user_id)[:6]}"
-            death_rate = self._calc_death_rate(player, base_death_rate, min_level, max_level)
-            # death_rate 为 0 表示已被境界压制完全免死，连骰子都不掷
-            died = death_rate > 0 and random.random() < death_rate
-            reward_rate = 1.0
-
-            if died and await self._try_resurrect_pill(player):
-                # 回生丹抵消本次阵亡（属性减半但活下来），按生还结算
-                died = False
-                results["saved"].append({"user_id": str(user_id), "name": player_name})
-
-            if died:
-                outcome = await self._apply_death(player)
-                if outcome is not None and getattr(outcome, "is_permanent", False):
-                    # 彻底陨落：角色数据已删除，不再发放奖励
-                    results["fallen"].append({"user_id": str(user_id), "name": player_name})
-                    await self._set_participant_result(event_id, user_id, RESULT_FALLEN)
-                    continue
-                results["deaths"].append({
-                    "user_id": str(user_id),
-                    "name": player_name,
-                    "soul": bool(getattr(outcome, "is_soul", False)),
-                })
-                await self._set_participant_result(event_id, user_id, RESULT_DEAD)
-                reward_rate = death_reward_rate
-            else:
-                results["survivors"].append({"user_id": str(user_id), "name": player_name})
-                await self._set_participant_result(event_id, user_id, RESULT_SURVIVOR)
-
-            rewards = self._calculate_rewards(event_data, reward_multiplier * reward_rate)
-            stored, failed = await self._grant_rewards(user_id, rewards)
-            rewards["stored"] = stored
-            results["rewards"][str(user_id)] = rewards
-            if failed:
-                results["not_stored"].extend(failed)
-
-            # 【新增】保存个人奖励明细到数据库，用于后续查询
-            await self._save_participant_rewards(event_id, user_id, rewards)
-
-            # 生还者推进悬赏进度（世界事件标签，见 config/bounty_templates.json）
-            if not died and bounty_tag:
-                await self._add_bounty_progress(user_id, bounty_tag, 1)
+        state = self._load_battle_state(event)
+        if state:
+            # 可见战斗过程：补算剩余回合后按战斗状态汇总（v3.10.0）
+            await self._settle_staged_event(event, state, results)
+        else:
+            # 旧版路径：整场一次掷骰（战斗过程未启用，或事件创建于旧版本）
+            await self._settle_legacy_event(event, participants, results)
 
         logger.info(
             f"[世界事件] 事件【{name}】(event_id={event_id}) 结算完成："
             f"生还 {len(results['survivors'])} / 回生丹免死 {len(results['saved'])} / "
             f"阵亡 {len(results['deaths'])} / 陨落 {len(results['fallen'])}"
+            + (f"，历经 {results.get('stages')} 回合" if results.get("stages") else "")
         )
 
         # 总结文案：AI 生成（未开启 AI 时使用固定模板）
@@ -908,147 +1224,149 @@ class WorldEventManager:
                 return level_name
         return ""
 
-    def _calc_death_rate(self, player: Player, base_death_rate: float, min_level: int, max_level: int) -> float:
-        """计算玩家本次事件的死亡率（境界越高越安全，高出一个大境界完全免死）
+    def _calc_death_rate_detail(
+        self, player: Player, base_death_rate: float, min_level: int, max_level: int
+    ) -> dict:
+        """死亡率明细（v3.10.0 小说化模型）
 
-        规则：
-        1. 基础值取模板 ``base_death_rate``，为 0 时直接免死
-        2. 【新增】高出推荐上限一个大境界或更多：**完全免死**，符合修仙小说设定
-           - 例如：筑基期参加炼气期事件、金丹期参加筑基期事件等
-        3. 低于事件最低门槛：额外 + ``death_under_level_penalty``（默认 0.2）
-        4. 处于推荐区间 [min_level, max_level] 内：从门槛处的 100% 线性衰减到
-           上限处的 ``1 - death_in_range_reduction``（默认只剩一半）
-        5. 高于推荐上限但同一大境界内：在 4 的基础上每高 1 级再乘 ``death_over_level_decay``（默认 0.6）
-        6. 战力影响：根据玩家综合战力额外降低死亡率（装备、丹药buff都有效）
+        风险链：``最终 = 基准 × 境界优势 × 战力优势``，三项相乘、连续变化，
+        不再是分档阶梯；低于 ``death_zero_threshold`` 直接归零（完全免死，不掷骰）。
 
-        返回 0 表示无论骰子如何都不会阵亡。
+        - **大境界压制**（v3.9.4 规则保留）：玩家大境界高于事件推荐**上限**的大境界
+          → 完全免死。锚点仍取 ``max_level`` 而非 ``min_level``：若锚在门槛，
+          炼虚期打「化神~合体」事件会直接免死，而该档奖励是皇品/帝品级，
+          等于白送奖励，会破坏平衡。
+        - **小境界优势**：每高出推荐**门槛**（``min_level``）1 级，风险乘
+          ``death_minor_decay``（默认 0.72）。旧版把优势摊在整条推荐区间上，
+          跨度 8 级时领先 1 级只值 6.25%，与小说体感严重不符。
+        - **战力优势**：见 ``_calc_combat_power_reduction``，连续曲线。
+
+        Returns:
+            dict: base / final / realm_multiplier / realm_note /
+                  combat_reduction / power_multiplier / immune / immune_reason
         """
         base = max(0.0, self._to_float(base_death_rate, 0.0))
+        detail = {
+            "base": base,
+            "final": 0.0,
+            "realm_multiplier": 1.0,
+            "realm_note": "",
+            "combat_reduction": 0.0,
+            "power_multiplier": 1.0,
+            "immune": False,
+            "immune_reason": "",
+        }
         if base <= 0.0:
-            return 0.0
+            detail["immune"] = True
+            detail["immune_reason"] = "该事件无生命风险"
+            return detail
 
         config = self._config()
-        reduction = self._clamp_rate(
-            config.get("death_in_range_reduction"),
-            DEFAULT_WORLD_EVENT_CONFIG["death_in_range_reduction"],
-        )
         level_index = self._to_int(getattr(player, "level_index", 0), 0)
         min_level = self._to_int(min_level, 0)
         max_level = self._to_int(max_level, 0)
 
-        # 【新增】境界压制：比较大境界，高出一个大境界完全免死
-        # 符合修仙小说设定：高一个大境界就是碾压，根本不会有生命危险
-        if max_level > 0 and level_index > max_level:
+        # 1) 大境界压制：高出一个大境界完全免死（v3.9.4 规则）
+        if max_level > 0:
             player_realm = self._get_major_realm(level_index)
             max_realm = self._get_major_realm(max_level)
+            player_rank = REALM_ORDER.index(player_realm) if player_realm in REALM_ORDER else -1
+            max_rank = REALM_ORDER.index(max_realm) if max_realm in REALM_ORDER else -1
+            if player_rank > max_rank and player_rank >= 0 and max_rank >= 0:
+                detail["immune"] = True
+                detail["realm_multiplier"] = 0.0
+                detail["immune_reason"] = f"{player_realm}碾压{max_realm}，完全免死"
+                return detail
 
-            # 定义大境界顺序
-            realm_order = ["炼气期", "筑基期", "金丹期", "元婴期", "化神期", "炼虚期", "合体期", "大乘期", "渡劫期", "地仙", "天仙", "大罗金仙", "混元大罗金仙"]
+        # 2) 小境界优势：以推荐门槛为满风险锚点
+        minor_decay = self._to_float(
+            config.get("death_minor_decay"),
+            DEFAULT_WORLD_EVENT_CONFIG["death_minor_decay"],
+        )
+        minor_decay = min(0.99, max(0.05, minor_decay))
 
-            try:
-                player_rank = realm_order.index(player_realm) if player_realm in realm_order else -1
-                max_rank = realm_order.index(max_realm) if max_realm in realm_order else -1
-
-                # 玩家大境界比事件推荐上限的大境界高至少1个
-                if player_rank > max_rank and player_rank >= 0 and max_rank >= 0:
-                    return 0.0  # 完全免死
-            except (ValueError, IndexError):
-                pass
-
-            # 同一大境界内，或大境界判断失败时，使用原有的指数衰减逻辑
-            # 【优化】根据境界高低调整衰减系数：后期境界每小境界差距更大
-            gap = level_index - max_level
-
-            # 根据事件推荐上限的境界等级，调整衰减系数
-            # 低阶境界（炼气-筑基）：每级衰减到60%（decay=0.6）
-            # 中阶境界（金丹-元婴）：每级衰减到50%（decay=0.5）
-            # 高阶境界（化神-炼虚）：每级衰减到40%（decay=0.4）
-            # 顶级境界（合体-大乘）：每级衰减到30%（decay=0.3）
-            if max_level >= 25:  # 合体期及以上
-                decay = 0.3
-            elif max_level >= 19:  # 化神期、炼虚期
-                decay = 0.4
-            elif max_level >= 13:  # 金丹期、元婴期
-                decay = 0.5
-            else:  # 炼气期、筑基期
-                decay = self._to_float(
-                    config.get("death_over_level_decay"),
-                    DEFAULT_WORLD_EVENT_CONFIG["death_over_level_decay"],
-                )
-                decay = min(0.95, max(0.0, decay))
-
-            base_rate = base * (1.0 - reduction) * (decay ** gap)
-        # 低于最低门槛：更危险
-        elif min_level > 0 and level_index < min_level:
-            penalty = max(
-                0.0,
-                self._to_float(
-                    config.get("death_under_level_penalty"),
-                    DEFAULT_WORLD_EVENT_CONFIG["death_under_level_penalty"],
-                ),
+        gap = level_index - min_level
+        if gap >= 0:
+            realm_multiplier = minor_decay ** gap
+            detail["realm_note"] = (
+                f"高出推荐门槛 {gap} 级，每级 ×{minor_decay:g}" if gap else "恰在推荐门槛"
             )
-            base_rate = base + penalty
-        # 模板未定义有效区间（max_level <= min_level）时不参与区间衰减
-        elif max_level <= min_level:
-            base_rate = base
         else:
-            # 推荐区间内：境界越高死亡率越低
-            span = max(1, max_level - min_level)
-            position = min(1.0, max(0.0, (level_index - min_level) / span))
-            base_rate = base * (1.0 - reduction * position)
+            # 兜底：join_event 已拦截低于门槛的报名，正常不会走到这里
+            under_mult = max(1.0, self._to_float(config.get("death_under_level_mult"), 1.35))
+            under_cap = max(1.0, self._to_float(config.get("death_under_level_cap"), 2.5))
+            realm_multiplier = min(under_cap, under_mult ** (-gap))
+            detail["realm_note"] = f"低于推荐门槛 {-gap} 级，风险 ×{realm_multiplier:.1f}"
+        detail["realm_multiplier"] = realm_multiplier
 
-        # 【新增】战力影响死亡率：根据玩家综合战力额外降低死亡率
+        # 3) 战力优势：连续曲线，战力越强越不容易死
         combat_reduction = self._calc_combat_power_reduction(player, level_index)
-        final_rate = base_rate * (1.0 - combat_reduction)
+        detail["combat_reduction"] = combat_reduction
+        detail["power_multiplier"] = max(0.0, 1.0 - combat_reduction)
 
-        return self._clamp_rate(final_rate)
+        final = base * realm_multiplier * detail["power_multiplier"]
 
-    def _calc_combat_power_reduction(self, player: Player, level_index: int) -> float:
-        """根据玩家战力计算死亡率减免（装备、丹药buff都有效）
+        zero_threshold = max(0.0, self._to_float(config.get("death_zero_threshold"), 0.015))
+        if final < zero_threshold:
+            detail["immune"] = True
+            detail["immune_reason"] = f"风险已低于 {zero_threshold * 100:.1f}%，视同完全免死"
+            return detail
 
-        战力越高，死亡率额外降低越多，最多降低30%
-        计算方式：综合考虑攻击、防御、精神力相对于境界的提升程度
+        detail["final"] = self._clamp_rate(final)
+        return detail
+
+    def _calc_death_rate(self, player: Player, base_death_rate: float, min_level: int, max_level: int) -> float:
+        """计算玩家本次事件的整场死亡率（实现见 ``_calc_death_rate_detail``）
+
+        返回 0 表示无论骰子如何都不会阵亡。
         """
-        config = self._config()
-        # 可配置：是否启用战力影响（默认启用）
-        if not config.get("enable_combat_power_reduction", True):
-            return 0.0
+        return self._calc_death_rate_detail(
+            player, base_death_rate, min_level, max_level
+        )["final"]
 
-        # 获取玩家装备加成后的总属性（包含丹药buff）
+    def _player_attr_combat_power(self, player: Player, level_index: int) -> Tuple[float, float]:
+        """玩家的属性战力与同境界期望基准
+
+        战力减免（``_calc_combat_power_reduction``）与事件输出能力
+        （``_player_battle_power``）共用同一套口径，避免两处公式各自漂移。
+
+        Returns:
+            (combat_power, expected_base)；属性获取失败时回退为境界期望值
+        """
+        expected_base = 100 + max(0, self._to_int(level_index, 0)) * 50
         try:
             equipped_items = self._get_player_equipped_items(player)
             pill_multipliers = self._get_player_pill_multipliers(player)
             total_attrs = player.get_total_attributes(equipped_items, pill_multipliers)
         except Exception as e:
             logger.warning(f"[世界事件] 计算战力加成失败: {e}")
-            return 0.0
-
-        # 基准值：该境界的期望属性（粗略估算）
-        expected_base = 100 + level_index * 50  # 每级提升50点基础属性
+            return float(expected_base), float(expected_base)
 
         # 综合战力：物攻、法攻、物防、法防、精神力的加权平均
         total_attack = total_attrs.get("physical_damage", 0) + total_attrs.get("magic_damage", 0)
         total_defense = total_attrs.get("physical_defense", 0) + total_attrs.get("magic_defense", 0)
         mental = total_attrs.get("mental_power", 0)
+        combat_power = total_attack * 0.4 + total_defense * 0.4 + mental * 0.2
+        return float(combat_power), float(expected_base)
 
-        # 计算战力相对提升率
-        combat_power = (total_attack * 0.4 + total_defense * 0.4 + mental * 0.2)
+    def _calc_combat_power_reduction(self, player: Player, level_index: int) -> float:
+        """根据玩家战力计算死亡率减免（装备、丹药buff 都有效）
+
+        战力越高死亡率越低，且是**连续**的：战力达到同境界期望值的 2 倍时
+        减免 50%，4 倍时减免 75%，上限由 ``combat_power_max_reduction`` 控制
+        （v3.10.0 起默认 0.90，此前为 0.30）。
+        """
+        config = self._config()
+        # 可配置：是否启用战力影响（默认启用）
+        if not config.get("enable_combat_power_reduction", True):
+            return 0.0
+
+        combat_power, expected_base = self._player_attr_combat_power(player, level_index)
         combat_ratio = combat_power / max(expected_base, 1)
 
-        # 战力提升比例 -> 死亡率减免（最多30%）
-        # 战力达到期望值2倍时减免15%，3倍时减免25%，4倍+时减免30%
-        max_reduction = config.get("combat_power_max_reduction", 0.30)  # 可配置最大减免
-        if combat_ratio >= 4.0:
-            return max_reduction
-        elif combat_ratio >= 3.0:
-            return max_reduction * 0.83  # 25%
-        elif combat_ratio >= 2.0:
-            return max_reduction * 0.50  # 15%
-        elif combat_ratio >= 1.5:
-            return max_reduction * 0.25  # 7.5%
-        else:
-            # 低于1.5倍标准战力，减免很少
-            return max(0.0, (combat_ratio - 1.0) * max_reduction * 0.2)
+        max_reduction = self._to_float(config.get("combat_power_max_reduction"), 0.90)
+        decay = self._to_float(config.get("combat_power_decay"), 1.0)
+        return self._combat_power_reduction_from_ratio(combat_ratio, max_reduction, decay)
 
     def _get_player_equipped_items(self, player: Player) -> List:
         """获取玩家装备的物品列表（用于战力计算）"""
@@ -1259,6 +1577,7 @@ class WorldEventManager:
     # 插件配置面板中的 AI 分组与键名映射
     AI_PLUGIN_GROUP = "AI_GENERATOR"
     AI_PLUGIN_KEY_MAP = {
+        "ENABLE_AI_BATTLE": "enable_ai_battle",
         "ENABLE_AI_INTRO": "enable_ai_intro",
         "ENABLE_AI_SUMMARY": "enable_ai_summary",
         "AI_API_KEY": "ai_api_key",
@@ -1341,6 +1660,186 @@ class WorldEventManager:
             logger.warning(f"[世界事件] AI 总结文案生成失败: {e}")
             return ""
 
+    # ==================== 结算辅助 ====================
+
+    async def _grant_event_rewards(
+        self, event_id, user_id: str, event_data: dict, multiplier: float, results: dict
+    ) -> None:
+        """发放奖励并回写个人明细（可见战斗过程与旧版结算共用）"""
+        rewards = self._calculate_rewards(event_data, multiplier)
+        stored, failed = await self._grant_rewards(user_id, rewards)
+        rewards["stored"] = stored
+        results["rewards"][str(user_id)] = rewards
+        if failed:
+            results["not_stored"].extend(failed)
+        # 保存个人奖励明细到数据库，用于「我的世界事件奖励」查询
+        await self._save_participant_rewards(event_id, user_id, rewards)
+
+    async def _settle_legacy_event(self, event: dict, participants: List[str], results: dict) -> None:
+        """旧版结算：整场一次掷骰
+
+        保留此路径有两个作用：``battle_process_enabled=false`` 时行为与 v3.9.x
+        完全一致；插件从旧版本升级时，已经在进行中的事件也能正常结算。
+        """
+        event_id = event["event_id"]
+        event_data = event["data"]
+        config = self._config()
+        base_death_rate = self._to_float(event_data.get("base_death_rate"), 0.0)
+        reward_multiplier = self._to_float(event_data.get("reward_multiplier"), 1.0)
+        death_reward_rate = self._to_float(config.get("death_penalty_reward_rate"), 0.2)
+        death_reward_rate = max(0.0, min(1.0, death_reward_rate))
+        min_level = self._to_int(event_data.get("min_level"), 0)
+        max_level = self._to_int(event_data.get("max_level"), 0)
+        bounty_tag = str(event_data.get("bounty_tag") or "")
+
+        for user_id in participants:
+            player = await self.db.get_player_by_id(user_id)
+            if not player:
+                continue
+
+            player_name = player.user_name or f"道友{str(user_id)[:6]}"
+            death_rate = self._calc_death_rate(player, base_death_rate, min_level, max_level)
+            # death_rate 为 0 表示已被境界压制完全免死，连骰子都不掷
+            died = death_rate > 0 and random.random() < death_rate
+            reward_rate = 1.0
+
+            if died and await self._try_resurrect_pill(player):
+                # 回生丹抵消本次阵亡（属性减半但活下来），按生还结算
+                died = False
+                results["saved"].append({"user_id": str(user_id), "name": player_name})
+
+            if died:
+                outcome = await self._apply_death(player)
+                if outcome is not None and getattr(outcome, "is_permanent", False):
+                    # 彻底陨落：角色数据已删除，不再发放奖励
+                    results["fallen"].append({"user_id": str(user_id), "name": player_name})
+                    await self._set_participant_result(event_id, user_id, RESULT_FALLEN)
+                    continue
+                results["deaths"].append({
+                    "user_id": str(user_id),
+                    "name": player_name,
+                    "soul": bool(getattr(outcome, "is_soul", False)),
+                })
+                await self._set_participant_result(event_id, user_id, RESULT_DEAD)
+                reward_rate = death_reward_rate
+            else:
+                results["survivors"].append({"user_id": str(user_id), "name": player_name})
+                await self._set_participant_result(event_id, user_id, RESULT_SURVIVOR)
+
+            await self._grant_event_rewards(
+                event_id, user_id, event_data, reward_multiplier * reward_rate, results
+            )
+
+            # 生还者推进悬赏进度（世界事件标签，见 config/bounty_templates.json）
+            if not died and bounty_tag:
+                await self._add_bounty_progress(user_id, bounty_tag, 1)
+
+    async def _settle_staged_event(self, event: dict, state: dict, results: dict) -> None:
+        """可见战斗过程结算：补算剩余回合 -> 按战斗状态汇总 -> 发奖
+
+        生死结果一律取自战斗过程中已落地的记录，不在这里重新掷骰，避免
+        「过程里活着、结算时突然死了」这种自相矛盾。
+        """
+        event_id = event["event_id"]
+        event_data = event["data"]
+        config = self._config()
+        reward_multiplier = self._to_float(event_data.get("reward_multiplier"), 1.0)
+        death_reward_rate = self._to_float(config.get("death_penalty_reward_rate"), 0.2)
+        death_reward_rate = max(0.0, min(1.0, death_reward_rate))
+        bounty_tag = str(event_data.get("bounty_tag") or "")
+
+        # 补算剩余回合：插件停机跨过整场战斗时，把没掷完的骰子一次补完，
+        # 保证总死亡率守恒、且最终生死与战斗过程一致。
+        nodes = int(state.get("nodes") or 1)
+        while int(state.get("resolved") or 0) < nodes:
+            record = battle.resolve_node(event_data, state)
+            dead, saved, fallen = await self._resolve_pending_deaths(event_id, record)
+            battle.apply_node_outcome(state, record, dead=dead, saved=saved, fallen=fallen)
+        await self._save_battle_state(event_id, int(state.get("resolved") or 0), state)
+
+        summary_state = battle.summarize_state(state)
+        results["stages"] = summary_state["nodes"]
+        results["boss_outcome"] = summary_state["boss_outcome"]
+        results["mvp"] = summary_state.get("mvp")
+        results["mvp_share"] = summary_state.get("mvp_share", 0.0)
+
+        results["deaths"] = list(state.get("deaths") or [])
+        results["saved"] = list(state.get("saved") or [])
+        results["fallen"] = list(state.get("fallen") or [])
+        dead_ids = {str(item.get("user_id")) for item in results["deaths"]}
+        fallen_ids = {str(item.get("user_id")) for item in results["fallen"]}
+
+        for user_id, player_state in (state.get("players") or {}).items():
+            user_id = str(user_id)
+            if user_id in fallen_ids:
+                continue  # 彻底陨落：角色数据已删除，不再发放奖励
+            name = str((player_state or {}).get("name") or f"道友{user_id[:6]}")
+            died = user_id in dead_ids
+            if died:
+                reward_rate = death_reward_rate
+            else:
+                reward_rate = 1.0
+                results["survivors"].append({"user_id": user_id, "name": name})
+                # 阵亡者由 _resolve_pending_deaths 写库，生还者必须在这里补写，
+                # 否则「世界事件战绩 / 战报 / 奖励」都会显示结果为「未知」
+                await self._set_participant_result(event_id, user_id, RESULT_SURVIVOR)
+
+            await self._grant_event_rewards(
+                event_id, user_id, event_data, reward_multiplier * reward_rate, results
+            )
+            if not died and bounty_tag:
+                await self._add_bounty_progress(user_id, bounty_tag, 1)
+
+    # ==================== AI 战况叙事（P1） ====================
+
+    def _fixed_battle_flavour(self, record: dict, casualties: int) -> str:
+        """未接入 AI 时的回合氛围句（确定性输出，便于复现排查）"""
+        if casualties > 0:
+            return BATTLE_FLAVOUR_CASUALTY
+        index = max(1, int(record.get("node") or 1)) - 1
+        return BATTLE_FLAVOUR[index % len(BATTLE_FLAVOUR)]
+
+    async def _generate_battle_text(
+        self, event_data: dict, state: dict, record: dict, casualties: int
+    ) -> str:
+        """生成回合金氛围文案（AI 关闭 / 失败时回退固定文案池）
+
+        缓存键为「模板 + 回合 + 伤亡档位」，**与群数无关**：一次自动生成会在多个
+        群开同名事件，节点文案按模板生成一次即可全群复用，因此接入 AI 后的
+        调用量不随群数线性膨胀（甚至低于改造前的 1 + 2N 次）。
+        """
+        key = (
+            str(event_data.get("template_id") or event_data.get("name") or ""),
+            int(record.get("node") or 0),
+            int(record.get("total") or 0),
+            0 if casualties <= 0 else (1 if casualties <= 2 else 2),
+        )
+        cached = self._battle_text_cache.get(key)
+        if cached:
+            return cached
+
+        text = ""
+        generator = self._get_ai_generator()
+        if generator is not None:
+            try:
+                text = await asyncio.to_thread(
+                    generator.generate_battle_stage,
+                    event_data.get("name", "世界事件"),
+                    event_data.get("tier", ""),
+                    int(record.get("node") or 1),
+                    int(record.get("total") or 1),
+                    int(round(float(record.get("boss_hp", 1.0)) * 100)),
+                    casualties,
+                ) or ""
+            except Exception as e:
+                logger.warning(f"[世界事件] AI 战况文案生成失败: {e}")
+                text = ""
+
+        if text:
+            self._battle_text_cache[key] = text
+            return text
+        return self._fixed_battle_flavour(record, casualties)
+
     # ==================== 定时推进 / 自动生成 ====================
 
     async def process_pending_events(self) -> List[Tuple[str, str]]:
@@ -1362,6 +1861,27 @@ class WorldEventManager:
 
         for event in await self.get_events_by_status(STATUS_IN_PROGRESS):
             end_time = self._to_int(event.get("end_time"), 0)
+            state = self._load_battle_state(event)
+
+            # 可见战斗过程：到点推进一个回合并播报战况。
+            # 战斗已过结束时间时不再逐段播报，剩余回合由 complete_event 一次性
+            # 补算——插件停机跨过整场战斗时，玩家不该被"补播"一串过场消息。
+            if state and end_time and now < end_time:
+                nodes = int(state.get("nodes") or 1)
+                while int(state.get("resolved") or 0) < nodes:
+                    index = int(state.get("resolved") or 0) + 1
+                    deadline = battle.node_deadline(
+                        self._to_int(event.get("start_time"), 0), end_time, nodes, index
+                    )
+                    if not deadline or now < deadline:
+                        break
+                    ok, node_msg = await self._advance_battle_node(event, state)
+                    if not ok:
+                        break
+                    # 战斗过程照常记录；人数不足时不把回合消息发到群里
+                    if node_msg and state.get("broadcast", True):
+                        messages.append((event["group_id"], node_msg))
+
             if not end_time or now < end_time:
                 continue
             ok, msg, _ = await self.complete_event(event["event_id"])
@@ -1384,16 +1904,9 @@ class WorldEventManager:
         if not template:
             return False, "⚠️ 事件模板为空，请检查 config/world_events.json", []
 
-        created: List[str] = []
-        for group_id in targets:
-            ok, _, _ = await self.create_event(group_id=group_id, template=template)
-            if ok:
-                created.append(group_id)
-
-        if not created:
-            return False, "⚠️ 所有目标群均已有进行中的世界事件，本次跳过", []
-
         name = template.get("name", "世界事件")
+        # 开场文案在循环外只生成一次，随事件快照落库；开战时直接复用，
+        # 避免此前「每群开战各调用一次 AI」的 N 倍浪费（v3.10.0 优化）
         intro = await self.generate_intro_text(
             {
                 "name": name,
@@ -1402,6 +1915,16 @@ class WorldEventManager:
             },
             0,
         )
+
+        created: List[str] = []
+        for group_id in targets:
+            ok, _, _ = await self.create_event(group_id=group_id, template=template, intro=intro)
+            if ok:
+                created.append(group_id)
+
+        if not created:
+            return False, "⚠️ 所有群均已有进行中的世界事件，本次跳过", []
+
         lines = [
             f"🌟 天地异动，世界事件【{name}】开启！",
             SEP,
@@ -1459,8 +1982,17 @@ class WorldEventManager:
             f"{SEP} 事件结算 {SEP}",
             f"🌟 【{results.get('name', '世界事件')}】",
             f"👥 参战道友：{results.get('participants', 0)} 人",
-            SEP,
         ]
+        if results.get("stages"):
+            lines.append(
+                f"🗺️ 历经 {int(results['stages'])} 回合鏖战，"
+                f"{results.get('boss_outcome', '战事已了')}"
+            )
+        mvp = results.get("mvp") or None
+        if mvp and mvp.get("name") and int(results.get("participants") or 0) > 1:
+            share = int(round(float(results.get("mvp_share") or 0) * 100))
+            lines.append(f"⚡ 本战主力：{mvp['name']}（输出占 {share}%）")
+        lines.append(SEP)
 
         survivors = results.get("survivors") or []
         deaths = results.get("deaths") or []
@@ -1509,7 +2041,7 @@ class WorldEventManager:
             lines.append(f"⚠️ 储物戒已满，未能入库：{'、'.join(unique)}")
 
         lines.append(SEP)
-        lines.append(f"💡 发送「{CMD_WORLD_EVENT_REWARDS}」查看你的个人奖励明细")
+        lines.append(f"💡 「{CMD_WORLD_EVENT_BATTLE}」看逐回合回放 · 「{CMD_WORLD_EVENT_REWARDS}」看奖励明细")
         return "\n".join(lines)
 
     def format_player_history(self, history: List[dict]) -> str:
@@ -1586,11 +2118,7 @@ class WorldEventManager:
                 )
 
             rewards = json.loads(rewards_json)
-            result_labels = {
-                RESULT_SURVIVOR: "✅ 生还",
-                RESULT_DEAD: "💀 阵亡",
-                RESULT_FALLEN: "🪦 陨落",
-            }
+            result_labels = RESULT_LABELS
 
             lines = [
                 "🎁 世界事件个人奖励",
@@ -1650,6 +2178,91 @@ class WorldEventManager:
         except Exception as e:
             logger.error(f"[世界事件] 查询玩家奖励失败: {e}")
             return f"❌ 查询奖励失败：{e}"
+
+    async def format_battle_report(self, user_id: str) -> str:
+        """个人视角战报：最近一场世界事件的逐回合回放（v3.10.0）
+
+        群内回合播报是「公共视角」，这里补上「我的视角」——每个玩家都能看到
+        自己每一回合做了什么、战意剩多少、在哪一回合倒下的。
+        """
+        try:
+            async with self.db.conn.execute(
+                """
+                SELECT e.event_id, e.event_data, e.battle_state, e.complete_time,
+                       p.result
+                FROM event_participants p
+                JOIN world_events e ON e.event_id = p.event_id
+                WHERE p.user_id = ? AND e.status = ?
+                ORDER BY e.event_id DESC LIMIT 1
+                """,
+                (str(user_id), STATUS_COMPLETED),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if not row:
+                return (
+                    "📭 暂无世界事件战报\n"
+                    f"{SEP}\n"
+                    "💡 参加过世界事件并完成结算后可查看逐回合回放"
+                )
+
+            event_data = self.parse_event_data(row["event_data"])
+            name = event_data.get("name", "世界事件")
+            result = row["result"]
+
+            lines = [
+                "📜 世界事件战报 · 我的视角",
+                SEP,
+                f"🌟 【{name}】（{event_data.get('tier', '未知')}）",
+            ]
+
+            state = self._load_battle_state({"battle_state": row["battle_state"]})
+            if not state:
+                # 未启用可见战斗过程（或旧版本结算的事件）
+                lines.append(f"📊 结算结果：{RESULT_LABELS.get(result, '❔ 未知')}")
+                lines.append(SEP)
+                lines.append("💡 该场事件未启用可见战斗过程（插件配置 → 世界事件配置 → 启用可见战斗过程）")
+                return "\n".join(lines)
+
+            summary = battle.summarize_state(state)
+            lines.append(
+                f"🗺️ 共 {summary['nodes']} 回合 · {summary['boss_outcome']}"
+            )
+            lines.append(SEP)
+
+            player_state = (state.get("players") or {}).get(str(user_id)) or {}
+            for note in player_state.get("notes") or []:
+                lines.append(f"【第{note.get('node')}回合】{note.get('text', '')}")
+
+            if not player_state.get("notes"):
+                lines.append("🌫️ 没有你的回合记录")
+
+            lines.append(SEP)
+            lines.append(f"📊 结算结果：{RESULT_LABELS.get(result, '❔ 未知')}")
+
+            mvp = summary.get("mvp") or None
+            if mvp and mvp.get("name") and len(state.get("players") or {}) > 1:
+                share = int(round(float(summary.get("mvp_share") or 0) * 100))
+                lines.append(f"⚡ 本战主力：{mvp['name']}（输出占 {share}%）")
+
+            deaths = summary.get("deaths") or []
+            if deaths:
+                names = "、".join(str(item.get("name") or "") for item in deaths)
+                lines.append(f"💀 此战阵亡：{names}")
+
+            # 风险系数透明化：让玩家知道自己为什么安全 / 危险
+            player = await self.db.get_player_by_id(user_id)
+            if player:
+                lines.append(SEP)
+                lines.append(self.describe_risk_breakdown(player, event_data))
+
+            lines.append(SEP)
+            lines.append(f"💡 「{CMD_WORLD_EVENT_REWARDS}」查看奖励明细 · 「{CMD_WORLD_EVENT_RECORD}」查看更多战绩")
+            return "\n".join(lines)
+
+        except Exception as e:
+            logger.error(f"[世界事件] 查询个人战报失败: {e}")
+            return f"❌ 查询战报失败：{e}"
 
     async def get_player_history(self, user_id: str, limit: int = 8) -> List[dict]:
         """获取玩家最近的世界事件记录"""
@@ -1728,6 +2341,15 @@ class WorldEventManager:
                 lines.append(f"发送「{CMD_JOIN_WORLD_EVENT}」参与战斗")
         else:
             lines.append(f"⏰ 战斗剩余：{self.format_duration(self._remaining_seconds(event))}")
+            state = self._load_battle_state(event)
+            if state:
+                resolved = int(state.get("resolved") or 0)
+                nodes = int(state.get("nodes") or 1)
+                boss_hp = int(round(float(state.get("boss_hp", 1.0)) * 100))
+                lines.append(
+                    f"🗺️ 战况进度：第 {resolved}/{nodes} 回合"
+                    f" · {battle.boss_label(event_data)}气血 {boss_hp}%"
+                )
             lines.append(SEP)
             if joined:
                 lines.append("⚔️ 你正在战斗中，结束后自动结算死亡与奖励")

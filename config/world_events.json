@@ -6,12 +6,20 @@
     "min_participants": 1,
     "signup_duration_seconds": 300,
     "death_penalty_reward_rate": 0.2,
+  "death_minor_decay": 0.72,
+  "death_under_level_mult": 1.35,
+  "death_under_level_cap": 2.5,
+  "death_zero_threshold": 0.015,
   "death_in_range_reduction": 0.5,
   "death_over_level_decay": 0.6,
   "death_safe_level_gap": 6,
   "death_under_level_penalty": 0.2,
   "enable_combat_power_reduction": true,
-  "combat_power_max_reduction": 0.30,
+  "combat_power_max_reduction": 0.90,
+  "combat_power_decay": 1.0,
+  "battle_process_enabled": true,
+  "battle_node_count": 0,
+  "battle_broadcast_min_participants": 2,
     "auto_tier_weights": {
       "low_tier": 40,
       "mid_tier": 30,
@@ -47,7 +55,7 @@
         }
       }
     },
-    "comment": "世界事件（批次4）：auto_interval_minutes 为自动生成间隔（分钟，取区间随机值）；signup_duration_seconds 为报名时长；death_penalty_reward_rate 为阵亡者奖励保留比例；auto_tier_weights 为自动生成时各难度权重；broadcast_groups 为空时使用插件白名单群；admin_users 为可手动创建事件的管理员（批次5）；ai_config 为AI文案生成配置（批次5，可选）。\n【v3.9.1 死亡率随境界衰减】：death_in_range_reduction=推荐区间内死亡率从门槛到上限的线性衰减比例（0.5=上限处只剩一半）；death_over_level_decay=高出推荐上限后每级乘以的衰减系数（0.6）；death_safe_level_gap=高出推荐上限多少级后完全免死（6，0=关闭）；death_under_level_penalty=低于最低门槛的额外死亡率（0.2）。另：持有回生丹的玩家阵亡时会被丹药抵消一次。\n【战力影响死亡率】：enable_combat_power_reduction=是否启用战力影响死亡率（true/false）；combat_power_max_reduction=战力最大减免比例（0.30=最多减免30%死亡率）。战力越高（装备+丹药buff），死亡率额外降低，让磕药、神装有实际收益。"
+    "comment": "世界事件（批次4）：auto_interval_minutes 为自动生成间隔（分钟，取区间随机值）；signup_duration_seconds 为报名时长；death_penalty_reward_rate 为阵亡者奖励保留比例；auto_tier_weights 为自动生成时各难度权重；broadcast_groups 为空时使用插件白名单群；admin_users 为可手动创建事件的管理员（批次5）；ai_config 为AI文案生成配置（批次5，可选）。\n【v3.9.1 死亡率随境界衰减】：death_in_range_reduction=推荐区间内死亡率从门槛到上限的线性衰减比例（0.5=上限处只剩一半）；death_over_level_decay=高出推荐上限后每级乘以的衰减系数（0.6）；death_safe_level_gap=高出推荐上限多少级后完全免死（6，0=关闭）；death_under_level_penalty=低于最低门槛的额外死亡率（0.2）。另：持有回生丹的玩家阵亡时会被丹药抵消一次。\n【战力影响死亡率】：enable_combat_power_reduction=是否启用战力影响死亡率（true/false）；combat_power_max_reduction=战力最大减免上限（0.90=最多减免90%）；combat_power_decay=减免曲线系数 k，减免 = 1 - 1/(1+k×(战力倍率-1))。战力越高（装备+丹药buff），死亡率额外降低，让磕药、神装有实际收益。\n【v3.10.0 小说化风险模型】：最终死亡率 = 事件基准 × 境界优势 × 战力优势。death_minor_decay=每高出推荐门槛 1 个小境界的风险系数（0.72，即每级 -28%）；death_zero_threshold=低于该风险即视同完全免死（0.015）；death_under_level_mult/death_under_level_cap=低于门槛时的风险倍率与上限（正常报名已被境界门槛拦截，此为兜底）。大境界压制沿用 v3.9.4 规则：玩家大境界高于事件推荐上限的大境界 -> 完全免死。\n【已废弃（v3.10.0 起不参与计算，仅保留以兼容旧配置）】：death_in_range_reduction、death_over_level_decay、death_safe_level_gap、death_under_level_penalty。\n【可见战斗过程】：battle_process_enabled=是否分阶段推进并播报战况；battle_node_count=回合数（0=按时长自动）；battle_broadcast_min_participants=触发回合播报所需的最少报名人数。"
   },
   "event_templates": {
     "low_tier": [
