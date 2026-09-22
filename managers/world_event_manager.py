@@ -114,6 +114,10 @@ CMD_WORLD_EVENT_RECORD = "世界事件战绩"
 CMD_WORLD_EVENT_REWARDS = "我的世界事件奖励"  # 查看个人奖励
 CMD_WORLD_EVENT_BATTLE = "世界事件战报"  # 新增：查看个人视角的战斗过程回放
 
+# 「世界事件战报」向前扫描的历史事件数：只有扫描到的历史事件里存在逐回合记录，
+# 才会回放那一场；否则退回最近一场并说明原因（v3.11.0）
+BATTLE_REPORT_SCAN_LIMIT = 20
+
 # 事件状态
 STATUS_SIGNUP = "signup"             # 报名中
 STATUS_IN_PROGRESS = "in_progress"   # 战斗中
@@ -2393,6 +2397,10 @@ class WorldEventManager:
         自己每一回合做了什么、战意剩多少、在哪一回合倒下的。
         """
         try:
+            # v3.11.0 修复：以前只取 event_id 最大的一场。若那一场恰好早于
+            # 「可见战斗过程」上线（例如玩家最近参战的是旧事件），就会误报
+            # 「未启用可见战斗过程」，即使功能与配置都是开着的。
+            # 现在多取几场，优先挑「真的有逐回合记录」的那一场。
             async with self.db.conn.execute(
                 """
                 SELECT e.event_id, e.event_data, e.battle_state, e.complete_time,
@@ -2400,22 +2408,39 @@ class WorldEventManager:
                 FROM event_participants p
                 JOIN world_events e ON e.event_id = p.event_id
                 WHERE p.user_id = ? AND e.status = ?
-                ORDER BY e.event_id DESC LIMIT 1
+                ORDER BY e.event_id DESC LIMIT ?
                 """,
-                (str(user_id), STATUS_COMPLETED),
+                (str(user_id), STATUS_COMPLETED, int(BATTLE_REPORT_SCAN_LIMIT)),
             ) as cursor:
-                row = await cursor.fetchone()
+                rows = await cursor.fetchall()
 
-            if not row:
+            if not rows:
                 return (
                     "📭 暂无世界事件战报\n"
                     f"{SEP}\n"
                     "💡 参加过世界事件并完成结算后可查看逐回合回放"
                 )
 
-            event_data = self.parse_event_data(row["event_data"])
+            picked = None
+            state = None
+            for candidate in rows:
+                loaded = self._load_battle_state({"battle_state": candidate["battle_state"]})
+                if loaded:
+                    picked, state = candidate, loaded
+                    break
+            if picked is None:
+                # 扫描范围内一场都没有记录：退回最近一场，并给出准确的解释
+                picked = rows[0]
+
+            skipped = []
+            for candidate in rows:
+                if candidate["event_id"] == picked["event_id"]:
+                    break
+                skipped.append(self.parse_event_data(candidate["event_data"]).get("name", "世界事件"))
+
+            event_data = self.parse_event_data(picked["event_data"])
             name = event_data.get("name", "世界事件")
-            result = row["result"]
+            result = picked["result"]
 
             lines = [
                 "📜 世界事件战报 · 我的视角",
@@ -2423,13 +2448,30 @@ class WorldEventManager:
                 f"🌟 【{name}】（{event_data.get('tier', '未知')}）",
             ]
 
-            state = self._load_battle_state({"battle_state": row["battle_state"]})
             if not state:
-                # 未启用可见战斗过程（或旧版本结算的事件）
+                # 扫描范围内确实没有逐回合记录：区分「配置没开」与「这场早于功能上线」
                 lines.append(f"📊 结算结果：{RESULT_LABELS.get(result, '❔ 未知')}")
                 lines.append(SEP)
-                lines.append("💡 该场事件未启用可见战斗过程（插件配置 → 世界事件配置 → 启用可见战斗过程）")
+                if self._battle_process_enabled():
+                    lines.append("💡 逐回合记录只对「开启可见战斗过程之后新开的事件」生效，历史事件不会补录")
+                    lines.append(f"   • 你最近 {len(rows)} 场参战记录里都还没有逐回合记录")
+                    lines.append("   • 下一场世界事件开战时就会有完整回放了")
+                else:
+                    lines.append("💡 该场事件未启用可见战斗过程")
+                    lines.append("   • 开启方式：插件配置 → 世界事件配置 → 启用可见战斗过程")
                 return "\n".join(lines)
+
+            if skipped:
+                # 最近一场没有记录、回放的是更早一场：说清楚，避免玩家误以为战报串场
+                if skipped[0] == name:
+                    hint = f"💡 你最近一场【{skipped[0]}】没有逐回合记录，已为你回放更早的一场（同名事件）"
+                else:
+                    hint = (
+                        f"💡 你最近一场【{skipped[0]}】没有逐回合记录，"
+                        f"已为你回放上一场有记录的【{name}】"
+                    )
+                lines.append(hint)
+                lines.append(SEP)
 
             summary = battle.summarize_state(state)
             lines.append(

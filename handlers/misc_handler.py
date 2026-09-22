@@ -25,7 +25,7 @@ class MiscHandler:
             return
 
         help_text = (
-            "📖 修仙指令大全 v3.11.0\n"
+            "📖 修仙指令大全 v3.11.1\n"
             "━━━━━━━━━━━━━━━\n"
             "\n"
             "📖【入门 & 基础】\n"
