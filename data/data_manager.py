@@ -66,7 +66,7 @@ class DataBase:
             INSERT INTO players (
                 user_id, level_index, spiritual_root,cultivation_type, user_name, lifespan,
                 experience, gold, state, cultivation_start_time, last_check_in_date, level_up_rate,
-                weapon, armor, main_technique, techniques,
+                weapon, armor, accessory, main_technique, techniques,
                 hp, mp, atk, atkpractice,
                 spiritual_qi, max_spiritual_qi, blood_qi, max_blood_qi,
                 magic_damage, physical_damage, magic_defense, physical_defense, mental_power,
@@ -76,7 +76,7 @@ class DataBase:
                 storage_ring, storage_ring_items,
                 daily_pill_usage, last_daily_reset,
                 is_soul_state, soul_death_time, soul_exp_before_death, used_rebirth
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 player.user_id,
@@ -93,6 +93,7 @@ class DataBase:
                 player.level_up_rate,
                 player.weapon,
                 player.armor,
+                player.accessory,
                 player.main_technique,
                 player.techniques,
                 player.hp,
@@ -175,6 +176,7 @@ class DataBase:
                 level_up_rate = ?,
                 weapon = ?,
                 armor = ?,
+                accessory = ?,
                 main_technique = ?,
                 techniques = ?,
                 hp = ?,
@@ -228,6 +230,7 @@ class DataBase:
                 player.level_up_rate,
                 player.weapon,
                 player.armor,
+                player.accessory,
                 player.main_technique,
                 player.techniques,
                 player.hp,

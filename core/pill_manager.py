@@ -302,6 +302,10 @@ class PillManager:
         subtype = pill_data.get("subtype", "")
         effect_type = pill_data.get("effect_type", "instant")
 
+        # 手动专用丹药（如还魂丹）：不参与一键服用，也如实显示为「需手动使用」
+        if pill_data.get("manual_only"):
+            return 0, "需手动使用"
+
         # 回生丹：效果不叠加
         if subtype == "resurrection":
             if player.has_resurrection_pill:

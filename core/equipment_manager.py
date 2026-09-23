@@ -8,6 +8,24 @@ if TYPE_CHECKING:
     from ..config_manager import ConfigManager
     from .storage_ring_manager import StorageRingManager
 
+# 单槽位装备定义：item_type -> (Player 字段名, 中文名)
+EQUIPMENT_SLOTS: Dict[str, tuple] = {
+    "weapon": ("weapon", "武器"),
+    "armor": ("armor", "防具"),
+    "accessory": ("accessory", "饰品"),
+    "main_technique": ("main_technique", "主修心法"),
+}
+
+# 「卸下」参数别名 -> 槽位标识（新增装备栏位时只需在这里补一行）
+SLOT_ALIASES: Dict[str, str] = {
+    "武器": "weapon", "兵器": "weapon", "weapon": "weapon",
+    "防具": "armor", "护甲": "armor", "armor": "armor",
+    "饰品": "accessory", "首饰": "accessory", "accessory": "accessory",
+    "主修心法": "main_technique", "心法": "main_technique", "main_technique": "main_technique",
+    "功法": "technique", "technique": "technique",
+}
+
+
 class EquipmentManager:
     """装备管理器 - 处理装备的穿戴、卸下和属性计算"""
 
@@ -259,52 +277,8 @@ class EquipmentManager:
         if not can_equip:
             return False, error_msg
 
-        # 根据物品类型装备到相应位置
-        if item.item_type == "weapon":
-            old_item = player.weapon
-            player.weapon = item.name
-            await self.db.update_player(player)
-            if old_item:
-                # 尝试将旧装备存入储物戒
-                storage_msg = await self._store_old_equipment(player, old_item)
-                return True, f"已将【{old_item}】替换为【{item.name}】（{item.rank}）{storage_msg}"
-            else:
-                return True, f"已装备武器【{item.name}】（{item.rank}）"
-
-        elif item.item_type == "armor":
-            old_item = player.armor
-            player.armor = item.name
-            await self.db.update_player(player)
-            if old_item:
-                # 尝试将旧装备存入储物戒
-                storage_msg = await self._store_old_equipment(player, old_item)
-                return True, f"已将【{old_item}】替换为【{item.name}】（{item.rank}）{storage_msg}"
-            else:
-                return True, f"已装备防具【{item.name}】（{item.rank}）"
-
-        elif item.item_type == "accessory":
-            old_item = player.accessory
-            player.accessory = item.name
-            await self.db.update_player(player)
-            if old_item:
-                # 尝试将旧装备存入储物戒
-                storage_msg = await self._store_old_equipment(player, old_item)
-                return True, f"已将【{old_item}】替换为【{item.name}】（{item.rank}）{storage_msg}"
-            else:
-                return True, f"已装备饰品【{item.name}】（{item.rank}）"
-
-        elif item.item_type == "main_technique":
-            old_item = player.main_technique
-            player.main_technique = item.name
-            await self.db.update_player(player)
-            if old_item:
-                # 尝试将旧心法存入储物戒
-                storage_msg = await self._store_old_equipment(player, old_item)
-                return True, f"已将主修心法【{old_item}】替换为【{item.name}】（{item.rank}）{storage_msg}"
-            else:
-                return True, f"已装备主修心法【{item.name}】（{item.rank}）"
-
-        elif item.item_type == "technique":
+        # 功法单独处理（多槽位列表）
+        if item.item_type == "technique":
             techniques_list = player.get_techniques_list()
 
             # 检查是否已装备
@@ -321,77 +295,127 @@ class EquipmentManager:
             await self.db.update_player(player)
             return True, f"已装备功法【{item.name}】（{item.rank}）（{len(techniques_list)}/3）"
 
-        else:
+        # 单槽位装备（武器/防具/饰品/主修心法）
+        slot_key = EQUIPMENT_SLOTS.get(item.item_type)
+        if not slot_key:
             return False, f"未知的装备类型：{item.item_type}"
 
-    async def unequip_item(self, player: Player, slot_or_name: str) -> tuple[bool, str]:
+        field, label = slot_key
+        old_item = getattr(player, field) or ""
+
+        if old_item == item.name:
+            return False, f"{label}【{item.name}】已装备，无需重复装备"
+
+        if old_item:
+            # 关键顺序：先把旧装备收回储物戒，收纳成功才允许替换
+            # （否则储物戒满格时旧装备会被直接覆盖，等于凭空消失）
+            stored, store_msg = await self._store_to_ring(player, old_item)
+            if not stored:
+                return False, (
+                    f"无法替换{label}：旧装备【{old_item}】{store_msg}\n"
+                    f"请先清理储物戒空间后再试（本次不会消耗【{item.name}】）"
+                )
+            # 收纳动作已写库，重新读取玩家数据，避免后续写入把刚存入的旧装备覆盖掉
+            refreshed = await self.db.get_player_by_id(player.user_id)
+            if refreshed:
+                player = refreshed
+
+        setattr(player, field, item.name)
+        await self.db.update_player(player)
+
+        if old_item:
+            return True, (
+                f"已将【{old_item}】替换为【{item.name}】（{item.rank}）\n"
+                f"旧装备【{old_item}】已存入储物戒"
+            )
+        return True, f"已装备{label}【{item.name}】（{item.rank}）"
+
+    def resolve_equipped(self, player: Player, slot_or_name: str) -> tuple[Optional[str], str]:
+        """把「卸下」的参数解析成 (槽位标识, 已装备物品名)
+
+        槽位标识：weapon / armor / accessory / main_technique / technique；
+        解析失败返回 (None, "")，槽位为空返回 (槽位标识, "")。
+
+        支持两种写法：
+          · 槽位名：武器 / 防具 / 饰品 / 心法 / 功法
+          · 装备名：直接写已装备的物品名（戮仙剑阵、星辰坠 …）
+        """
+        value = (slot_or_name or "").strip()
+        if not value:
+            return None, ""
+
+        slot = SLOT_ALIASES.get(value)
+        if slot == "technique":
+            if value in ("功法", "technique"):
+                return "technique", ""
+            if value in player.get_techniques_list():
+                return "technique", value
+            return None, ""
+        if slot:
+            field, _ = EQUIPMENT_SLOTS[slot]
+            return slot, (getattr(player, field) or "")
+
+        # 按已装备物品名匹配
+        for key, (field, _) in EQUIPMENT_SLOTS.items():
+            if (getattr(player, field) or "") == value:
+                return key, value
+        if value in player.get_techniques_list():
+            return "technique", value
+
+        return None, ""
+
+    async def unequip_item(self, player: Player, slot_or_name: str) -> tuple[bool, str, str]:
         """卸下装备
 
         Args:
             player: 玩家对象
-            slot_or_name: 装备槽位名称（武器/防具/主修心法）或功法名称
+            slot_or_name: 槽位名称（武器/防具/饰品/心法/功法）或已装备的物品名
 
         Returns:
-            (是否成功, 消息)
+            (是否成功, 消息, 卸下的物品名)
         """
-        # 尝试按槽位卸下
-        if slot_or_name in ["武器", "weapon"]:
-            if not player.weapon:
-                return False, "未装备武器"
-            item_name = player.weapon
-            player.weapon = ""
-            await self.db.update_player(player)
-            return True, f"已卸下武器【{item_name}】"
+        slot, item_name = self.resolve_equipped(player, slot_or_name)
 
-        elif slot_or_name in ["防具", "armor"]:
-            if not player.armor:
-                return False, "未装备防具"
-            item_name = player.armor
-            player.armor = ""
-            await self.db.update_player(player)
-            return True, f"已卸下防具【{item_name}】"
+        if slot is None:
+            return False, (
+                f"未找到装备：{slot_or_name}\n"
+                f"可用槽位：武器 / 防具 / 饰品 / 心法 / 功法，也可直接输入已装备的物品名"
+            ), ""
 
-        elif slot_or_name in ["饰品", "accessory"]:
-            if not player.accessory:
-                return False, "未装备饰品"
-            item_name = player.accessory
-            player.accessory = ""
-            await self.db.update_player(player)
-            return True, f"已卸下饰品【{item_name}】"
+        label = "功法" if slot == "technique" else EQUIPMENT_SLOTS[slot][1]
 
-        elif slot_or_name in ["主修心法", "心法", "main_technique"]:
-            if not player.main_technique:
-                return False, "未装备主修心法"
-            item_name = player.main_technique
-            player.main_technique = ""
-            await self.db.update_player(player)
-            return True, f"已卸下主修心法【{item_name}】"
+        if not item_name:
+            if slot == "technique":
+                techniques = player.get_techniques_list()
+                if techniques:
+                    return False, f"请指定要卸下的功法名（当前：{' / '.join(techniques)}）", ""
+            return False, f"未装备{label}", ""
 
-        # 尝试从功法列表中卸下（按名称）
-        techniques_list = player.get_techniques_list()
-        if slot_or_name in techniques_list:
-            techniques_list.remove(slot_or_name)
-            player.set_techniques_list(techniques_list)
-            await self.db.update_player(player)
-            return True, f"已卸下功法【{slot_or_name}】"
+        # 关键顺序：先存回储物戒，收纳成功后再清空装备栏，避免卸下即销毁
+        stored, store_msg = await self._store_to_ring(player, item_name)
+        if not stored:
+            return False, (
+                f"无法卸下【{item_name}】：{store_msg}\n"
+                f"请先清理储物戒空间后再试（本次不会卸下装备）"
+            ), ""
+        # 收纳动作已写库，重新读取玩家数据，避免后续写入把刚存入的装备覆盖掉
+        refreshed = await self.db.get_player_by_id(player.user_id)
+        if refreshed:
+            player = refreshed
 
-        return False, f"未找到装备：{slot_or_name}"
-
-    async def _store_old_equipment(self, player: Player, item_name: str) -> str:
-        """尝试将旧装备存入储物戒
-
-        Args:
-            player: 玩家对象
-            item_name: 物品名称
-
-        Returns:
-            存储结果消息
-        """
-        if not self.storage_ring_manager:
-            return ""
-
-        success, msg = await self.storage_ring_manager.store_item(player, item_name, 1, silent=True)
-        if success:
-            return f"\n旧装备【{item_name}】已存入储物戒"
+        if slot == "technique":
+            techniques_list = player.get_techniques_list()
+            if item_name in techniques_list:
+                techniques_list.remove(item_name)
+                player.set_techniques_list(techniques_list)
         else:
-            return f"\n⚠️ 旧装备【{item_name}】存入储物戒失败：{msg}"
+            setattr(player, EQUIPMENT_SLOTS[slot][0], "")
+
+        await self.db.update_player(player)
+        return True, f"已卸下{label}【{item_name}】，并放回储物戒", item_name
+
+    async def _store_to_ring(self, player: Player, item_name: str) -> tuple[bool, str]:
+        """把一件装备放回储物戒（失败原因原样返回，供上层提示）"""
+        if not self.storage_ring_manager:
+            return False, "储物戒系统未初始化"
+        return await self.storage_ring_manager.store_item(player, item_name, 1, silent=True)

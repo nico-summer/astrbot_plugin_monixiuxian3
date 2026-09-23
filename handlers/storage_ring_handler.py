@@ -6,6 +6,7 @@ from astrbot.api.event import AstrMessageEvent
 from ..data import DataBase
 from ..core import StorageRingManager
 from ..config_manager import ConfigManager
+from typing import Dict, List, Optional
 from ..models import Player
 from .utils import (
     player_required,
@@ -105,6 +106,7 @@ class StorageRingHandler:
         self.config_manager = config_manager
         self.item_registry = item_registry
         self.storage_ring_manager = StorageRingManager(db, config_manager)
+        self._recipe_material_map: Optional[Dict[str, List[str]]] = None
 
     @player_required
     async def handle_storage_ring(self, player: Player, event: AstrMessageEvent):
@@ -148,7 +150,7 @@ class StorageRingHandler:
         lines.append(f"取出：{CMD_RETRIEVE_ITEM} 物品名 [数量]\n")
         lines.append(f"搜索：{CMD_SEARCH_ITEM} 关键词\n")
         lines.append(f"炼化：{CMD_REFINE_MATERIAL} 材料名 [数量/全部]\n")
-        lines.append(f"一键炼化：{CMD_REFINE_ALL}（炼化全部可炼化材料）\n")
+        lines.append(f"一键炼化：{CMD_REFINE_ALL}（炼化全部可炼化材料，自动跳过丹药配方原料🔒）\n")
         lines.append(f"物品信息：物品信息 物品名（查看类型/品质/用途）\n")
         lines.append(f"升级：{CMD_UPGRADE_RING} 储物戒名")
 
@@ -157,13 +159,21 @@ class StorageRingHandler:
     @player_required
     async def handle_refine_catalog(self, player: Player, event: AstrMessageEvent):
         """显示Boss材料的明确炼化用途。"""
-        lines = ["=== 材料炼化图鉴 ===\n", "以下Boss材料均可稳定炼化为灵石与修为。\n"]
+        recipe_materials = self._get_recipe_material_map()
+        lines = ["=== 材料炼化图鉴 ===\n", "以下材料均可稳定炼化为灵石与修为。\n"]
         for item_name, (gold, experience) in MATERIAL_REFINING_VALUES.items():
-            lines.append(f"【{item_name}】×1 → 灵石{gold:,} + 修为{experience:,}\n")
+            if item_name in recipe_materials:
+                lines.append(
+                    f"🔒【{item_name}】×1 → 灵石{gold:,} + 修为{experience:,}"
+                    f"（{self._recipe_owner_text(item_name)} 原料）\n"
+                )
+            else:
+                lines.append(f"【{item_name}】×1 → 灵石{gold:,} + 修为{experience:,}\n")
 
         # 统计当前储物戒中可直接炼化的材料
         items = player.get_storage_ring_items()
         owned_lines = []
+        protected_lines = []
         total_gold = 0
         total_exp = 0
         for item_name, (gold_each, exp_each) in MATERIAL_REFINING_VALUES.items():
@@ -172,21 +182,31 @@ class StorageRingHandler:
                 continue
             gold_gain = gold_each * count
             exp_gain = exp_each * count
+            if item_name in recipe_materials:
+                protected_lines.append(
+                    f"  · {item_name}×{count}（{self._recipe_owner_text(item_name)} 原料）\n"
+                )
+                continue
             total_gold += gold_gain
             total_exp += exp_gain
             owned_lines.append(f"  · {item_name}×{count} → 灵石{gold_gain:,} + 修为{exp_gain:,}\n")
 
         if owned_lines:
-            lines.append("\n📦 你可炼化的材料：\n")
+            lines.append("\n📦 你可一键炼化的材料：\n")
             lines.extend(owned_lines)
             lines.append(f"合计可获：灵石{total_gold:,} + 修为{total_exp:,}\n")
             lines.append(f"💡 使用 {CMD_REFINE_ALL} 一次性全部炼化\n")
         else:
-            lines.append("\n📦 储物戒中暂时没有可炼化材料\n")
+            lines.append("\n📦 储物戒中暂时没有可一键炼化的材料\n")
+
+        if protected_lines:
+            lines.append("\n🔒 丹药配方原料（一键炼化会自动跳过）：\n")
+            lines.extend(protected_lines)
+            lines.append(f"  确实要炼化请显式执行：{CMD_REFINE_MATERIAL} 材料名 数量\n")
 
         lines.append(f"\n用法：{CMD_REFINE_MATERIAL} 材料名 数量\n")
         lines.append(f"示例：{CMD_REFINE_MATERIAL} 仙器碎片 1；{CMD_REFINE_MATERIAL} 功法残页 全部\n")
-        lines.append(f"一键炼化：{CMD_REFINE_ALL}（无需参数，炼化所有可炼化材料）")
+        lines.append(f"一键炼化：{CMD_REFINE_ALL}（无需参数，炼化所有可炼化材料，自动跳过配方原料）")
         yield event.plain_result("".join(lines))
 
     @player_required
@@ -242,9 +262,15 @@ class StorageRingHandler:
         if not success:
             yield event.plain_result(f"炼化失败：【{item_name}】数量不足，当前仅有 {current_count} 个")
             return
+        warning = ""
+        if item_name in self._get_recipe_material_map():
+            warning = (
+                f"\n\n⚠️ 注意：【{item_name}】是【{self._recipe_owner_text(item_name)}】的原料，"
+                f"\n已被你显式炼化（{CMD_REFINE_ALL} 会自动跳过这类材料）"
+            )
         yield event.plain_result(
             f"🔥 炼化成功！\n【{item_name}】×{count}\n"
-            f"获得灵石：+{gold_gain:,}\n获得修为：+{experience_gain:,}"
+            f"获得灵石：+{gold_gain:,}\n获得修为：+{experience_gain:,}{warning}"
         )
 
     @player_required
@@ -260,17 +286,37 @@ class StorageRingHandler:
             yield r
 
     async def _refine_all(self, player: Player, event: AstrMessageEvent):
-        """执行一键炼化并输出明细（不加装饰器，便于多个指令名复用）。"""
+        """执行一键炼化并输出明细（不加装饰器，便于多个指令名复用）。
+
+        丹药配方原料（还魂丹的九转仙草等）会自动跳过，只提示不炼化；
+        需要炼化时用「炼化材料 <材料名> 数量」显式操作。
+        """
+        recipe_materials = self._get_recipe_material_map()
+
+        refine_values: Dict[str, tuple] = {}
+        skipped: List[tuple] = []
+        for item_name, values in MATERIAL_REFINING_VALUES.items():
+            if item_name in recipe_materials:
+                count = self.storage_ring_manager.get_item_count(player, item_name)
+                if count > 0:
+                    skipped.append((item_name, count))
+                continue
+            refine_values[item_name] = values
+
         success, results, total_gold, total_exp = await self.db.ext.refine_storage_materials_batch(
             player.user_id,
-            MATERIAL_REFINING_VALUES,
+            refine_values,
         )
 
         if not success or not results:
-            yield event.plain_result(
-                "❌ 储物戒中没有可炼化的材料\n"
-                f"使用 {CMD_REFINE_CATALOG} 查看可炼化材料与炼化价值"
-            )
+            lines = ["❌ 储物戒中没有可一键炼化的材料\n"]
+            if skipped:
+                lines.append("🔒 以下丹药配方原料已自动跳过（可手动炼化）：\n")
+                for item_name, count in skipped:
+                    lines.append(f"  · {item_name}×{count}（{self._recipe_owner_text(item_name)}）\n")
+                lines.append(f"\n💡 确实要炼化请显式执行：{CMD_REFINE_MATERIAL} 材料名 数量\n")
+            lines.append(f"使用 {CMD_REFINE_CATALOG} 查看可炼化材料与炼化价值")
+            yield event.plain_result("".join(lines))
             return
 
         lines = ["🔥 一键炼化完成！\n", "━━━━━━━━━━━━━━━\n"]
@@ -283,6 +329,13 @@ class StorageRingHandler:
         lines.append(f"共炼化：{total_count} 个材料（{len(results)} 种）\n")
         lines.append(f"获得灵石：+{total_gold:,}\n")
         lines.append(f"获得修为：+{total_exp:,}")
+
+        if skipped:
+            lines.append("\n\n🔒 已自动跳过丹药配方原料（不炼掉你的炼丹材料）：\n")
+            for item_name, count in skipped:
+                lines.append(f"  · {item_name}×{count}（{self._recipe_owner_text(item_name)}）\n")
+            lines.append(f"💡 确实要炼化请显式执行：{CMD_REFINE_MATERIAL} 材料名 数量")
+
         yield event.plain_result("".join(lines))
 
     @player_required
@@ -628,6 +681,20 @@ class StorageRingHandler:
             return raw
         return " ".join(part.strip() for part in parts if part and part.strip())
 
+    def _get_recipe_material_map(self) -> Dict[str, List[str]]:
+        """配方原料保护名单：材料名 -> 需要它的丹药名列表（来自 config/alchemy_recipes.json）
+
+        「一键炼化」会自动跳过这些材料，避免把还魂丹等丹药的原料顺手炼掉。
+        """
+        if self._recipe_material_map is None:
+            getter = getattr(self.config_manager, "get_recipe_material_map", None)
+            self._recipe_material_map = getter() if callable(getter) else {}
+        return self._recipe_material_map
+
+    def _recipe_owner_text(self, item_name: str) -> str:
+        """该材料是哪些丹药的原料（用于提示文案）"""
+        return " / ".join(self._get_recipe_material_map().get(item_name) or [])
+
     def _item_label(self, item_name: str) -> str:
         """物品名后缀信息，例如（武器·凡品）、（可炼化⚗️）"""
         tags = []
@@ -639,7 +706,11 @@ class StorageRingHandler:
                 tags.append(brief)
 
         if item_name in MATERIAL_REFINING_VALUES:
-            tags.append("可炼化⚗️")
+            if item_name in self._get_recipe_material_map():
+                # 丹药配方原料：可手动炼化，但「一键炼化」会跳过
+                tags.append("配方材料🔒")
+            else:
+                tags.append("可炼化⚗️")
 
         return f"（{'·'.join(tags)}）" if tags else ""
 

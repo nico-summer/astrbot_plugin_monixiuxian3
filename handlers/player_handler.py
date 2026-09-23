@@ -172,6 +172,7 @@ class PlayerHandler:
         # 获取装备信息
         weapon_name = player.weapon if player.weapon else "无"
         armor_name = player.armor if player.armor else "无"
+        accessory_name = player.accessory if player.accessory else "无"
         main_technique_name = player.main_technique if player.main_technique else "无"
         technique_items = {
             item.name: item for item in equipped_items
@@ -255,6 +256,7 @@ class PlayerHandler:
             f"  主修心法：{main_technique_name}\n"
             f"  法器：{weapon_name}\n"
             f"  防具：{armor_name}\n"
+            f"  饰品：{accessory_name}\n"
             f"  功法：{len(techniques_list)}/3\n"
         )
         if techniques_list:

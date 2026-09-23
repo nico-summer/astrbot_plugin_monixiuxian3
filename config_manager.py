@@ -27,6 +27,7 @@ class ConfigManager:
         self.boss_config: Dict[str, Any] = {}
         self.rift_config: Dict[str, Any] = {}
         self.alchemy_config: Dict[str, Any] = {}
+        self._recipe_material_map: Optional[Dict[str, List[str]]] = None  # 材料 -> 需要它的丹药（懒加载缓存）
         self.death_config: Dict[str, Any] = {}  # 死亡系统配置（批次1）
         self.world_event_config: Dict[str, Any] = {}  # 世界事件配置（批次4）
         self.world_event_templates: Dict[str, List[dict]] = {}  # 世界事件模板（批次4）
@@ -266,6 +267,32 @@ class ConfigManager:
         if star <= 0:
             return None
         return min(star, 5)
+
+    def get_recipe_material_map(self) -> Dict[str, List[str]]:
+        """材料名 -> 需要该材料的丹药名列表（来自 config/alchemy_recipes.json）
+
+        用途：保护丹药配方原料不被「一键炼化」顺手炼掉
+        （例如还魂丹的九转仙草 / 太古龙骨 / 灵髓精华 / 月华精粹）。
+        """
+        if self._recipe_material_map is not None:
+            return self._recipe_material_map
+
+        mapping: Dict[str, List[str]] = {}
+        for pill_name, recipe in (self.alchemy_recipes or {}).items():
+            if not isinstance(recipe, dict):
+                continue
+            materials = recipe.get("materials") or recipe.get("cost") or {}
+            if not isinstance(materials, dict):
+                continue
+            for material in materials:
+                if not material:
+                    continue
+                pills = mapping.setdefault(material, [])
+                if pill_name not in pills:
+                    pills.append(pill_name)
+
+        self._recipe_material_map = mapping
+        return mapping
 
     def get_pill_star(self, pill_name: str) -> int:
         """获取丹药星级（1-5）
